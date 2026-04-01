@@ -1,3 +1,4 @@
+import YAML from "yaml";
 import path from "node:path";
 import { parseSkill } from "./parser.js";
 
@@ -15,13 +16,16 @@ export function importMarkdownSkill(source, options = {}) {
   const name = parsed.metadata.name ?? slugifyName(fileName);
   const description = parsed.metadata.description ?? "Imported markdown runeflow. Add executable workflow steps manually.";
   const docs = parsed.docs || source.trim();
+  const frontmatter = YAML.stringify({
+    name,
+    description,
+    version: 0.1,
+    inputs: {},
+    outputs: {},
+  }).trimEnd();
 
   return `---
-name: ${name}
-description: ${description}
-version: 0.1
-inputs: {}
-outputs: {}
+${frontmatter}
 ---
 
 ${docs}

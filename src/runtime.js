@@ -6,6 +6,8 @@ import { validateShape } from "./schema.js";
 import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
 import { validateSkill } from "./validator.js";
 
+const DEFAULT_RUNS_DIR = ".runeflow-runs";
+
 function createRunId() {
   const now = new Date();
   const compact = now.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -97,7 +99,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     throw new ValidationError("Skill validation failed.", validation.issues);
   }
 
-  const runsDir = options.runsDir ?? path.resolve(process.cwd(), ".skill-runs");
+  const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
   const run = {
     run_id: createRunId(),
     runeflow: {

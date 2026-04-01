@@ -6,6 +6,9 @@ import { parseRuneflow } from "./parser.js";
 import { runRuneflow } from "./runtime.js";
 import { validateRuneflow } from "./validator.js";
 
+const DEFAULT_RUNS_DIR = ".runeflow-runs";
+const LEGACY_RUNS_DIR = ".skill-runs";
+
 function parseOptions(argumentsList) {
   const positional = [];
   const options = {};
@@ -50,6 +53,18 @@ async function loadInput(rawInput) {
   return JSON.parse(rawInput);
 }
 
+async function loadRunArtifact(runId, runsDir, fallbackRunsDir = null) {
+  try {
+    return await fs.readFile(path.join(runsDir, `${runId}.json`), "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT" || !fallbackRunsDir) {
+      throw error;
+    }
+
+    return fs.readFile(path.join(fallbackRunsDir, `${runId}.json`), "utf8");
+  }
+}
+
 export async function runCli(argv) {
   const [command, ...rest] = argv;
   const { positional, options } = parseOptions(rest);
@@ -57,8 +72,8 @@ export async function runCli(argv) {
   if (!command || command === "help" || command === "--help") {
     console.log(`Usage:
   runeflow validate <file>
-  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs]
-  runeflow inspect-run <run-id> [--runs-dir ./.runeflow-runs]
+  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
+  runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow import <file> [--output converted.runeflow.md]`);
     return;
   }
@@ -93,8 +108,9 @@ export async function runCli(argv) {
 
   if (command === "inspect-run") {
     const runId = positional[0];
-    const runsDir = path.resolve(process.cwd(), options["runs-dir"] ?? ".runeflow-runs");
-    const artifact = await fs.readFile(path.join(runsDir, `${runId}.json`), "utf8");
+    const runsDir = path.resolve(process.cwd(), options["runs-dir"] ?? DEFAULT_RUNS_DIR);
+    const fallbackRunsDir = options["runs-dir"] ? null : path.resolve(process.cwd(), LEGACY_RUNS_DIR);
+    const artifact = await loadRunArtifact(runId, runsDir, fallbackRunsDir);
     console.log(JSON.stringify(JSON.parse(artifact), null, 2));
     return;
   }
