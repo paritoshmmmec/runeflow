@@ -1,6 +1,6 @@
-# Skillforge
+# Runeflow
 
-`skillforge` is a small runtime for hybrid skills:
+`runeflow` is a small runtime for hybrid skills:
 
 - Markdown stays available for human-facing guidance.
 - A fenced `skill` block defines executable workflow steps.

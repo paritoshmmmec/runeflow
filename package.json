@@ -1,5 +1,5 @@
 {
-  "name": "skillforge",
+  "name": "runeflow",
   "version": "0.1.0",
   "description": "Hybrid markdown + DSL skill workflow runtime",
   "type": "module",
