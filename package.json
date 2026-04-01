@@ -1,0 +1,16 @@
+{
+  "name": "skillforge",
+  "version": "0.1.0",
+  "description": "Hybrid markdown + DSL skill workflow runtime",
+  "type": "module",
+  "bin": {
+    "skill": "./bin/skill.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "validate:example": "node ./bin/skill.js validate ./examples/open-pr.skill.md"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  }
+}
