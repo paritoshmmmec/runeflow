@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseSkill } from "../src/parser.js";
-import { validateSkill } from "../src/validator.js";
+import { parseRuneflow } from "../src/parser.js";
+import { validateRuneflow } from "../src/validator.js";
 
-test("validateSkill accepts a valid hybrid skill", () => {
-  const parsed = parseSkill(`---
+test("validateRuneflow accepts a valid hybrid runeflow", () => {
+  const parsed = parseRuneflow(`---
 name: valid
 description: Valid skill
 version: 0.1
@@ -14,7 +14,7 @@ outputs:
   done: boolean
 ---
 
-\`\`\`skill
+\`\`\`runeflow
 step check type=tool {
   tool: mock.check
   out: { ok: boolean }
@@ -37,13 +37,13 @@ output {
 \`\`\`
 `);
 
-  const validation = validateSkill(parsed);
+  const validation = validateRuneflow(parsed);
   assert.equal(validation.valid, true);
   assert.deepEqual(validation.issues, []);
 });
 
-test("validateSkill rejects forward references and missing llm schema", () => {
-  const parsed = parseSkill(`---
+test("validateRuneflow rejects forward references and missing llm schema", () => {
+  const parsed = parseRuneflow(`---
 name: invalid
 description: Invalid skill
 version: 0.1
@@ -53,7 +53,7 @@ outputs:
   result: string
 ---
 
-\`\`\`skill
+\`\`\`runeflow
 step write type=llm {
   prompt: "hi"
 }
@@ -75,7 +75,7 @@ output {
 \`\`\`
 `);
 
-  const validation = validateSkill(parsed);
+  const validation = validateRuneflow(parsed);
   assert.equal(validation.valid, false);
   assert.match(validation.issues.join("\n"), /must declare a schema/);
   assert.match(validation.issues.join("\n"), /unknown or forward step reference/);

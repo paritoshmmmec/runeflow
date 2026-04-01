@@ -2,7 +2,7 @@
 
 Runeflow is a tiny workflow runtime for executable AI skills.
 
-It keeps Markdown for human guidance, adds a small DSL for machine-readable flow, and writes one JSON artifact for every run.
+It keeps Markdown for human guidance, adds a small `runeflow` block for machine-readable flow, and writes JSON artifacts for every run.
 
 ## Why Runeflow
 
@@ -17,7 +17,7 @@ Runeflow is meant to fill that gap without becoming a heavyweight orchestration 
 
 ## What You Get
 
-- Hybrid authoring: Markdown docs plus a fenced `skill` block
+- Hybrid authoring: Markdown docs plus a fenced `runeflow` block
 - Typed `tool`, `llm`, and `branch` steps
 - Ordered execution with `retry`, `fallback`, and terminal `fail`
 - JSON run artifacts with per-step inputs, outputs, status, attempts, and errors
@@ -40,17 +40,17 @@ The runtime is intentionally small and does not support loops, recursion, arbitr
 ```bash
 npm install
 npm test
-node ./bin/runeflow.js validate ./examples/open-pr.skill.md
-node ./bin/runeflow.js run ./examples/open-pr.skill.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
+node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md
+node ./bin/runeflow.js run ./examples/open-pr.runeflow.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
 ```
 
 ## CLI
 
 ```bash
-runeflow validate ./examples/open-pr.skill.md
-runeflow run ./examples/open-pr.skill.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
+runeflow validate ./examples/open-pr.runeflow.md
+runeflow run ./examples/open-pr.runeflow.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
 runeflow inspect-run <run-id>
-runeflow import ./legacy-skill.md
+runeflow import ./legacy-runeflow.md
 ```
 
 ## Install Modes
@@ -76,7 +76,7 @@ By default Bun respects Node shebangs, so a CLI file marked with `#!/usr/bin/env
 bunx --bun runeflow --help
 ```
 
-## Hybrid Skill Shape
+## Hybrid Runeflow Shape
 
 This is the core idea: keep the prose humans want, and add a small executable workflow for the runtime.
 
@@ -95,7 +95,7 @@ outputs:
 
 Operator-facing guidance lives here.
 
-```skill
+```runeflow
 step check_template type=tool {
   tool: file.exists
   with: { path: ".github/pull_request_template.md" }
@@ -114,14 +114,29 @@ output {
 ```
 ````
 
+## Result Passing
+
+Nodes already receive previous step outputs in memory through expressions like `steps.draft_pr.title`.
+
+Runeflow now also persists one JSON artifact per step, so downstream steps can reference:
+
+- `steps.<id>.result_path`
+- `steps.<id>.artifact_path`
+- `steps.<id>.outputs.*`
+
+That gives you two data-flow modes:
+
+- fast in-memory value passing for normal bindings
+- explicit file references when a later node wants the full prior result object
+
 ## Example Run Artifact
 
-Each run writes a JSON artifact that can be inspected by people or consumed by other tooling.
+Each run writes a run-level JSON artifact, and each step also gets its own JSON artifact on disk.
 
 ```json
 {
   "run_id": "run_20260401115249_i1s3q5",
-  "skill": {
+  "runeflow": {
     "name": "open-pr",
     "version": 0.1
   },
@@ -132,6 +147,8 @@ Each run writes a JSON artifact that can be inspected by people or consumed by o
       "kind": "llm",
       "status": "success",
       "attempts": 1,
+      "artifact_path": "/tmp/.runeflow-runs/run_123/steps/draft_pr.json",
+      "result_path": "/tmp/.runeflow-runs/run_123/steps/draft_pr.json",
       "outputs": {
         "title": "Use existing PR template",
         "body": "Filled from template-aware draft flow."
@@ -148,10 +165,10 @@ Each run writes a JSON artifact that can be inspected by people or consumed by o
 
 The library exports:
 
-- `parseSkill(source)`
-- `validateSkill(definition)`
-- `runSkill(definition, inputs, runtime)`
-- `importMarkdownSkill(source)`
+- `parseRuneflow(source)`
+- `validateRuneflow(definition)`
+- `runRuneflow(definition, inputs, runtime)`
+- `importMarkdownRuneflow(source)`
 
 `runtime.tools` is a registry of named tool handlers. `runtime.llm` handles `llm` steps and must return data that satisfies the step schema.
 
@@ -161,7 +178,7 @@ The library exports:
 - `src/parser.js`: markdown + DSL parser
 - `src/validator.js`: static validation and reference checks
 - `src/runtime.js`: workflow execution and artifact persistence
-- `examples/open-pr.skill.md`: end-to-end sample skill
+- `examples/open-pr.runeflow.md`: end-to-end sample runeflow
 
 ## Roadmap
 

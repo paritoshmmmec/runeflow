@@ -27,11 +27,11 @@ function extractFrontmatter(source) {
   };
 }
 
-function extractSkillBlock(markdownBody) {
-  const matches = [...markdownBody.matchAll(/```skill\n([\s\S]*?)\n```/g)];
+function extractRuneflowBlock(markdownBody) {
+  const matches = [...markdownBody.matchAll(/```(?:runeflow|skill)\n([\s\S]*?)\n```/g)];
 
   if (matches.length > 1) {
-    throw new SkillSyntaxError("Only one ```skill fenced block is supported.");
+    throw new SkillSyntaxError("Only one ```runeflow fenced block is supported. Legacy ```skill blocks are also accepted.");
   }
 
   if (matches.length === 0) {
@@ -261,7 +261,7 @@ function parseWorkflow(workflowSource) {
 
 export function parseSkill(source, options = {}) {
   const { frontmatter, remainder } = extractFrontmatter(source);
-  const { docs, workflowSource } = extractSkillBlock(remainder);
+  const { docs, workflowSource } = extractRuneflowBlock(remainder);
   const workflow = parseWorkflow(workflowSource);
 
   return {
@@ -278,3 +278,5 @@ export function parseSkill(source, options = {}) {
     raw: source,
   };
 }
+
+export const parseRuneflow = parseSkill;

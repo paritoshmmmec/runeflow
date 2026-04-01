@@ -11,9 +11,9 @@ outputs:
 
 # Open PR
 
-This skill shows how to mix operator-facing notes with executable workflow steps.
+This runeflow shows how to mix operator-facing notes with executable workflow steps.
 
-```skill
+```runeflow
 step check_template type=tool {
   tool: file.exists
   with: { path: ".github/pull_request_template.md" }
@@ -43,7 +43,8 @@ step create_pr type=tool {
     title: steps.draft_pr.title,
     body: steps.draft_pr.body,
     base: inputs.base_branch,
-    draft: inputs.draft
+    draft: inputs.draft,
+    draft_result_path: steps.draft_pr.result_path
   }
   out: { pr_number: number, pr_url: string }
   next: finish

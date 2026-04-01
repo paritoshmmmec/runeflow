@@ -1,6 +1,18 @@
 import { SkillSyntaxError } from "./errors.js";
 import { getByPath } from "./utils.js";
 
+const STEP_STATE_FIELDS = new Set([
+  "status",
+  "error",
+  "attempts",
+  "artifact_path",
+  "result_path",
+  "inputs",
+  "outputs",
+  "started_at",
+  "finished_at",
+]);
+
 function tokenize(expression) {
   const tokens = [];
   let index = 0;
@@ -235,7 +247,7 @@ function resolvePath(pathExpression, state) {
       return { found: true, value: stepState.outputs };
     }
 
-    if (rest[0] in stepState && (rest[0] === "status" || rest[0] === "error" || rest[0] === "attempts")) {
+    if (rest[0] in stepState && STEP_STATE_FIELDS.has(rest[0])) {
       if (rest.length === 1) {
         return { found: true, value: stepState[rest[0]] };
       }

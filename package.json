@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.skill.md"
+    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md"
   },
   "dependencies": {
     "yaml": "^2.8.1"

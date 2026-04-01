@@ -39,6 +39,14 @@ async function writeRunArtifact(run, runsDir) {
   return artifactPath;
 }
 
+async function writeStepArtifact(runId, stepRun, runsDir) {
+  const stepArtifactsDir = path.join(runsDir, runId, "steps");
+  await ensureDir(stepArtifactsDir);
+  const artifactPath = path.join(stepArtifactsDir, `${stepRun.id}.json`);
+  await fs.writeFile(artifactPath, JSON.stringify(stepRun, null, 2));
+  return artifactPath;
+}
+
 function buildStepState(stepRuns) {
   return Object.fromEntries(stepRuns.map((stepRun) => [stepRun.id, stepRun]));
 }
@@ -92,7 +100,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   const runsDir = options.runsDir ?? path.resolve(process.cwd(), ".skill-runs");
   const run = {
     run_id: createRunId(),
-    skill: {
+    runeflow: {
       name: definition.metadata.name,
       version: definition.metadata.version,
     },
@@ -165,6 +173,9 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       finished_at: new Date().toISOString(),
     };
 
+    stepRun.artifact_path = await writeStepArtifact(run.run_id, stepRun, runsDir);
+    stepRun.result_path = stepRun.artifact_path;
+
     run.steps.push(stepRun);
 
     if (lastError) {
@@ -224,3 +235,5 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   run.artifact_path = await writeRunArtifact(run, runsDir);
   return run;
 }
+
+export const runRuneflow = runSkill;

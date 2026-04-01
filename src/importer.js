@@ -13,7 +13,7 @@ export function importMarkdownSkill(source, options = {}) {
   const parsed = parseSkill(source, options);
   const fileName = options.sourcePath ? path.basename(options.sourcePath, path.extname(options.sourcePath)) : "imported-skill";
   const name = parsed.metadata.name ?? slugifyName(fileName);
-  const description = parsed.metadata.description ?? "Imported markdown skill. Add executable workflow steps manually.";
+  const description = parsed.metadata.description ?? "Imported markdown runeflow. Add executable workflow steps manually.";
   const docs = parsed.docs || source.trim();
 
   return `---
@@ -26,7 +26,7 @@ outputs: {}
 
 ${docs}
 
-\`\`\`skill
+\`\`\`runeflow
 step todo type=tool {
   tool: replace.me
   with: {}
@@ -40,3 +40,5 @@ output {
 \`\`\`
 `;
 }
+
+export const importMarkdownRuneflow = importMarkdownSkill;

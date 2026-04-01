@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { importMarkdownSkill } from "../src/importer.js";
+import { importMarkdownRuneflow } from "../src/importer.js";
 
-test("importMarkdownSkill preserves docs and adds placeholder workflow", () => {
-  const imported = importMarkdownSkill(`---
+test("importMarkdownRuneflow preserves docs and adds placeholder workflow", () => {
+  const imported = importMarkdownRuneflow(`---
 name: old-skill
 description: Legacy skill
 ---
@@ -16,4 +16,5 @@ Follow these instructions carefully.
   assert.match(imported, /name: old-skill/);
   assert.match(imported, /Follow these instructions carefully/);
   assert.match(imported, /step todo type=tool/);
+  assert.match(imported, /```runeflow/);
 });

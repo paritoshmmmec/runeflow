@@ -2,6 +2,18 @@ import { collectExpressionPaths, looksLikeExpression, parseExpression } from "./
 import { shapeHasPath } from "./schema.js";
 import { isPlainObject } from "./utils.js";
 
+const STEP_RUNTIME_FIELDS = new Set([
+  "status",
+  "error",
+  "attempts",
+  "artifact_path",
+  "result_path",
+  "inputs",
+  "outputs",
+  "started_at",
+  "finished_at",
+]);
+
 function collectReferences(value, issues, location) {
   const references = [];
 
@@ -78,7 +90,10 @@ function validateReferencePath(pathExpression, availableInputs, availableSteps, 
       return;
     }
 
-    if (rest[0] === "status" || rest[0] === "error" || rest[0] === "attempts") {
+    if (STEP_RUNTIME_FIELDS.has(rest[0])) {
+      if (rest[0] === "outputs" && rest.length > 1 && !shapeHasPath(stepSchema, rest.slice(1))) {
+        issues.push(`${location}: unknown step output path '${pathExpression}'`);
+      }
       return;
     }
 
@@ -252,3 +267,5 @@ export function validateSkill(definition) {
     warnings,
   };
 }
+
+export const validateRuneflow = validateSkill;

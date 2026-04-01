@@ -3,12 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseSkill } from "../src/parser.js";
-import { runSkill } from "../src/runtime.js";
+import { parseRuneflow } from "../src/parser.js";
+import { runRuneflow } from "../src/runtime.js";
 
-test("runSkill executes linear tool -> llm -> tool workflow and writes artifact", async () => {
-  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "skill-runs-"));
-  const parsed = parseSkill(`---
+test("runRuneflow executes linear tool -> llm -> tool workflow and writes artifacts", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
 name: linear
 description: Linear workflow
 version: 0.1
@@ -18,7 +18,7 @@ outputs:
   pr_url: string
 ---
 
-\`\`\`skill
+\`\`\`runeflow
 step first type=tool {
   tool: mock.first
   out: { ready: boolean }
@@ -32,7 +32,11 @@ step draft type=llm {
 
 step publish type=tool {
   tool: mock.publish
-  with: { title: steps.draft.title, draft: inputs.draft }
+  with: {
+    title: steps.draft.title,
+    draft: inputs.draft,
+    draft_result_path: steps.draft.result_path
+  }
   out: { pr_url: string }
 }
 
@@ -45,9 +49,13 @@ output {
   const runtime = {
     tools: {
       "mock.first": async () => ({ ready: true }),
-      "mock.publish": async ({ title, draft }) => ({
-        pr_url: `https://example.test/${draft ? "draft" : "ready"}/${encodeURIComponent(title)}`,
-      }),
+      "mock.publish": async ({ title, draft, draft_result_path }) => {
+        const draftArtifact = JSON.parse(await fs.readFile(draft_result_path, "utf8"));
+        assert.equal(draftArtifact.outputs.title, title);
+        return {
+          pr_url: `https://example.test/${draft ? "draft" : "ready"}/${encodeURIComponent(title)}`,
+        };
+      },
     },
     llm: async () => ({
       title: "Demo PR",
@@ -55,21 +63,23 @@ output {
     }),
   };
 
-  const run = await runSkill(parsed, { draft: true }, runtime, { runsDir });
+  const run = await runRuneflow(parsed, { draft: true }, runtime, { runsDir });
 
   assert.equal(run.status, "success");
   assert.equal(run.steps.length, 3);
   assert.equal(run.outputs.pr_url, "https://example.test/draft/Demo%20PR");
+  assert.match(run.steps[1].result_path, /draft\.json$/);
 
   const artifact = JSON.parse(await fs.readFile(run.artifact_path, "utf8"));
   assert.equal(artifact.run_id, run.run_id);
+  assert.equal(artifact.runeflow.name, "linear");
   assert.equal(artifact.steps[1].outputs.title, "Demo PR");
 });
 
-test("runSkill retries llm validation failure and uses fallback", async () => {
-  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "skill-runs-"));
+test("runRuneflow retries llm validation failure and uses fallback", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
   let attempts = 0;
-  const parsed = parseSkill(`---
+  const parsed = parseRuneflow(`---
 name: fallback
 description: Fallback workflow
 version: 0.1
@@ -78,7 +88,7 @@ outputs:
   result: string
 ---
 
-\`\`\`skill
+\`\`\`runeflow
 step draft type=llm retry=1 fallback=recover {
   prompt: "write"
   schema: { title: string }
@@ -112,7 +122,7 @@ output {
     },
   };
 
-  const run = await runSkill(parsed, {}, runtime, { runsDir });
+  const run = await runRuneflow(parsed, {}, runtime, { runsDir });
 
   assert.equal(run.status, "success");
   assert.equal(run.steps[0].status, "failed");
@@ -121,9 +131,9 @@ output {
   assert.equal(run.outputs.result, "recovered");
 });
 
-test("runSkill routes branch targets", async () => {
-  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "skill-runs-"));
-  const parsed = parseSkill(`---
+test("runRuneflow routes branch targets", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
 name: branch
 description: Branch workflow
 version: 0.1
@@ -133,7 +143,7 @@ outputs:
   result: string
 ---
 
-\`\`\`skill
+\`\`\`runeflow
 branch choose {
   if: inputs.use_primary
   then: primary
@@ -171,7 +181,7 @@ output {
     },
   };
 
-  const run = await runSkill(parsed, { use_primary: true }, runtime, { runsDir });
+  const run = await runRuneflow(parsed, { use_primary: true }, runtime, { runsDir });
 
   assert.equal(run.status, "success");
   assert.deepEqual(run.steps.map((step) => step.id), ["choose", "primary", "finish"]);
