@@ -1,7 +1,7 @@
 {
   "name": "runeflow",
   "version": "0.1.0",
-  "description": "Hybrid markdown + DSL skill workflow runtime",
+  "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
   "bin": {
     "skill": "./bin/skill.js"
