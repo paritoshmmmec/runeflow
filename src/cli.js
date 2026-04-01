@@ -56,10 +56,10 @@ export async function runCli(argv) {
 
   if (!command || command === "help" || command === "--help") {
     console.log(`Usage:
-  skill validate <file>
-  skill run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.skill-runs]
-  skill inspect-run <run-id> [--runs-dir ./.skill-runs]
-  skill import <file> [--output converted.skill.md]`);
+  runeflow validate <file>
+  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.skill-runs]
+  runeflow inspect-run <run-id> [--runs-dir ./.skill-runs]
+  runeflow import <file> [--output converted.skill.md]`);
     return;
   }
 

@@ -4,11 +4,11 @@
   "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
   "bin": {
-    "skill": "./bin/skill.js"
+    "runeflow": "./bin/runeflow.js"
   },
   "scripts": {
     "test": "node --test",
-    "validate:example": "node ./bin/skill.js validate ./examples/open-pr.skill.md"
+    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.skill.md"
   },
   "dependencies": {
     "yaml": "^2.8.1"

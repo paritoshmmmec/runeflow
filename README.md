@@ -40,17 +40,40 @@ The runtime is intentionally small and does not support loops, recursion, arbitr
 ```bash
 npm install
 npm test
-node ./bin/skill.js validate ./examples/open-pr.skill.md
-node ./bin/skill.js run ./examples/open-pr.skill.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
+node ./bin/runeflow.js validate ./examples/open-pr.skill.md
+node ./bin/runeflow.js run ./examples/open-pr.skill.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
 ```
 
 ## CLI
 
 ```bash
-skill validate ./examples/open-pr.skill.md
-skill run ./examples/open-pr.skill.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
-skill inspect-run <run-id>
-skill import ./legacy-skill.md
+runeflow validate ./examples/open-pr.skill.md
+runeflow run ./examples/open-pr.skill.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js
+runeflow inspect-run <run-id>
+runeflow import ./legacy-skill.md
+```
+
+## Install Modes
+
+With npm:
+
+```bash
+npm install
+npm link
+runeflow --help
+```
+
+With Bun as the package manager:
+
+```bash
+bun install
+bunx runeflow --help
+```
+
+By default Bun respects Node shebangs, so a CLI file marked with `#!/usr/bin/env node` will run with Node unless you explicitly force Bun. If you want Bun to execute the CLI runtime directly, use:
+
+```bash
+bunx --bun runeflow --help
 ```
 
 ## Hybrid Skill Shape
@@ -134,7 +157,7 @@ The library exports:
 
 ## Project Layout
 
-- `bin/skill.js`: CLI entrypoint
+- `bin/runeflow.js`: CLI entrypoint
 - `src/parser.js`: markdown + DSL parser
 - `src/validator.js`: static validation and reference checks
 - `src/runtime.js`: workflow execution and artifact persistence
