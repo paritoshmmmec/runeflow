@@ -1,33 +1,43 @@
-export const tools = {
-  "file.exists": async ({ path }) => ({
-    exists: path === ".github/pull_request_template.md",
-  }),
-  "git.push_current_branch": async () => ({
-    branch: "codex/example-open-pr",
-    remote: "origin",
-  }),
-  "github.create_pr": async ({ title, body, base, draft }) => ({
-    pr_number: 42,
-    pr_url: `https://example.test/${encodeURIComponent(base)}/${draft ? "draft" : "ready"}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`,
-  }),
-  "util.fail": async ({ message }) => ({
-    message,
-  }),
-  "util.complete": async ({ pr_url }) => ({
-    pr_url,
-  }),
-};
+import { runCerebrasJsonCompletion } from "./cerebras.js";
 
-export async function llm({ input }) {
-  if (input.template_exists) {
-    return {
-      title: "Use existing PR template",
-      body: "Filled from template-aware draft flow.",
-    };
+function buildMessages({ prompt, input, docs, context }) {
+  const operatorNotes = docs?.trim()
+    ? docs.trim()
+    : "No operator notes were provided.";
+
+  const systemPrompt = [
+    "You are preparing a pull request draft for a local repository workflow.",
+    "You are not responsible for enforcing Runeflow execution semantics.",
+    "Return JSON only with keys 'title' and 'body'.",
+    "Keep the title concise and make the body useful to a human reviewer.",
+    `Runeflow metadata: ${context.metadata.name}@${context.metadata.version}`,
+  ].join("\n");
+
+  const userPrompt = [
+    prompt,
+    "",
+    "Projected operator notes:",
+    operatorNotes,
+    "",
+    "Resolved workflow input:",
+    JSON.stringify(input, null, 2),
+  ].join("\n");
+
+  return [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+}
+
+export async function llm({ prompt, input, docs, context }) {
+  const parsed = await runCerebrasJsonCompletion(buildMessages({ prompt, input, docs, context }));
+
+  if (typeof parsed.title !== "string" || typeof parsed.body !== "string") {
+    throw new Error("Cerebras API JSON response must include string fields 'title' and 'body'.");
   }
 
   return {
-    title: "Create pull request",
-    body: "Generated without a template.",
+    title: parsed.title,
+    body: parsed.body,
   };
 }

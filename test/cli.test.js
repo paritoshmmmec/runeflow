@@ -106,3 +106,46 @@ test("runCli inspect-run falls back to legacy skill runs when no runeflow artifa
     process.chdir(originalCwd);
   }
 });
+
+test("runCli run uses built-in tools without a custom runtime module", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-builtins-"));
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(path.join(tempDir, "present.txt"), "ready\n");
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: builtin-demo
+description: Built-in tool demo
+version: 0.1
+inputs: {}
+outputs:
+  exists: boolean
+---
+
+\`\`\`runeflow
+step check type=tool {
+  tool: file.exists
+  with: { path: "./present.txt" }
+  out: { exists: boolean }
+}
+
+output {
+  exists: steps.check.exists
+}
+\`\`\`
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() => runCli(["run", "./workflow.runeflow.md"]));
+    const run = JSON.parse(output);
+
+    assert.equal(run.status, "success");
+    assert.equal(run.outputs.exists, true);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});

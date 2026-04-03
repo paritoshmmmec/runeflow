@@ -299,6 +299,71 @@ function evaluateAst(node, state) {
   throw new SkillSyntaxError("Unsupported expression node.");
 }
 
+export function hasTemplateExpressions(value) {
+  return typeof value === "string" && value.includes("{{");
+}
+
+function parseTemplateSegments(template) {
+  const segments = [];
+  let cursor = 0;
+
+  while (cursor < template.length) {
+    const openIndex = template.indexOf("{{", cursor);
+
+    if (openIndex === -1) {
+      if (cursor < template.length) {
+        segments.push({ type: "text", value: template.slice(cursor) });
+      }
+      break;
+    }
+
+    if (openIndex > cursor) {
+      segments.push({ type: "text", value: template.slice(cursor, openIndex) });
+    }
+
+    const closeIndex = template.indexOf("}}", openIndex + 2);
+    if (closeIndex === -1) {
+      throw new SkillSyntaxError("Unterminated template expression.");
+    }
+
+    const expression = template.slice(openIndex + 2, closeIndex).trim();
+    if (!expression) {
+      throw new SkillSyntaxError("Template expression cannot be empty.");
+    }
+
+    segments.push({ type: "expression", value: expression });
+    cursor = closeIndex + 2;
+  }
+
+  return segments;
+}
+
+export function collectTemplatePaths(template) {
+  return parseTemplateSegments(template)
+    .filter((segment) => segment.type === "expression")
+    .flatMap((segment) => collectExpressionPaths(segment.value));
+}
+
+export function resolveTemplate(template, state) {
+  const segments = parseTemplateSegments(template);
+  const expressionSegments = segments.filter((segment) => segment.type === "expression");
+
+  if (expressionSegments.length === 1 && segments.length === 1) {
+    return evaluateExpression(expressionSegments[0].value, state);
+  }
+
+  return segments
+    .map((segment) => {
+      if (segment.type === "text") {
+        return segment.value;
+      }
+
+      const resolved = evaluateExpression(segment.value, state);
+      return typeof resolved === "string" ? resolved : JSON.stringify(resolved);
+    })
+    .join("");
+}
+
 export function looksLikeExpression(value) {
   return typeof value === "string" && /\b(?:inputs|steps)\./.test(value);
 }

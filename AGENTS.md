@@ -10,6 +10,8 @@ Runeflow combines:
 - a fenced `runeflow` block for executable workflow logic
 - JSON artifacts for run-level and step-level outputs
 
+The runtime owns execution semantics. LLM handlers may see projected docs and resolved inputs, but they should not be expected to parse or enforce the Runeflow DSL itself.
+
 The goal is to keep the runtime small and easy to evolve during experimentation. Prefer simple, explicit designs over flexible but heavy abstractions.
 
 ## Current Runtime Model
@@ -55,6 +57,8 @@ Downstream steps can consume previous node results in two ways:
 1. In-memory bindings like `steps.draft_pr.title`
 2. Artifact paths like `steps.draft_pr.result_path` or `steps.draft_pr.artifact_path`
 
+String-valued fields may also use `{{ ... }}` interpolation. Exact templates should preserve native values; mixed templates should render as strings.
+
 Each executed step should continue to write its own JSON artifact. Preserve this behavior unless the artifact model is explicitly being redesigned.
 
 ## Important Files
@@ -63,6 +67,7 @@ Each executed step should continue to write its own JSON artifact. Preserve this
 - `src/validator.js`: static validation, reference checking, shape enforcement
 - `src/expression.js`: `inputs.*` and `steps.*` reference resolution
 - `src/runtime.js`: execution engine and artifact writing
+- `src/builtins.js`: built-in file and git tool registry
 - `src/cli.js`: command surface
 - `src/index.js`: public exports
 - `examples/`: reference runeflows and runtime examples
@@ -94,7 +99,7 @@ node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md
 If runtime behavior changes, also run:
 
 ```bash
-node ./bin/runeflow.js run ./examples/open-pr.runeflow.md --input '{"base_branch":"main","draft":true}' --runtime ./examples/open-pr-runtime.js --runs-dir ./.runeflow-runs
+node ./bin/runeflow.js run ./examples/open-pr.runeflow.md --input '{"base_branch":"main"}' --runtime ./examples/open-pr-runtime.js --runs-dir ./.runeflow-runs
 ```
 
 ## Style Guidance

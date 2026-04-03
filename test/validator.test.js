@@ -80,3 +80,41 @@ output {
   assert.match(validation.issues.join("\n"), /must declare a schema/);
   assert.match(validation.issues.join("\n"), /unknown or forward step reference/);
 });
+
+test("validateRuneflow checks interpolated references in prompts outputs and fail messages", () => {
+  const parsed = parseRuneflow(`---
+name: interpolated
+description: Interpolated references
+version: 0.1
+inputs:
+  branch: string
+outputs:
+  message: string
+---
+
+\`\`\`runeflow
+step first type=tool {
+  tool: mock.first
+  out: { ok: boolean }
+}
+
+step draft type=llm {
+  prompt: "Draft {{ steps.future.title }} for {{ inputs.branch }}"
+  input: { ready: "{{ steps.first.ok }}" }
+  schema: { title: string }
+  fail_message: "Unable to draft for {{ inputs.unknown }}"
+}
+
+output {
+  message: "Prepared {{ steps.draft.missing }}"
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /unknown or forward step reference 'steps\.future\.title'/);
+  assert.match(validation.issues.join("\n"), /unknown input reference 'inputs\.unknown'/);
+  assert.match(validation.issues.join("\n"), /unknown step output path 'steps\.draft\.missing'/);
+});

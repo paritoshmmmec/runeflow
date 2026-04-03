@@ -1,17 +1,24 @@
 ---
-name: open-pr
-description: Create and publish a pull request from the current branch.
-version: 0.1
+name: prepare-pr
+description: Prepare a pull request draft from the current local branch.
+version: 0.2
 inputs:
   base_branch: string
-  draft: boolean
 outputs:
-  pr_url: string
+  branch: string
+  title: string
+  body: string
+  diff_summary: string
 ---
 
-# Open PR
+# Prepare PR
 
-This runeflow shows how to mix operator-facing notes with executable workflow steps.
+These operator notes stay in the same hybrid file as the executable flow. Runeflow projects
+this prose to the `llm` step as `docs`, while the fenced `runeflow` block remains the
+runtime-owned execution contract.
+
+Use this workflow to draft a pull request for the current branch against `base_branch`.
+The LLM should only rely on the resolved prompt, resolved input, and these operator notes.
 
 ```runeflow
 step check_template type=tool {
@@ -20,59 +27,57 @@ step check_template type=tool {
   out: { exists: boolean }
 }
 
-step draft_pr type=llm retry=1 fallback=abort_missing_llm {
-  prompt: "Draft a PR title and body for the current branch changes."
-  input: { template_exists: steps.check_template.exists }
-  schema: { title: string, body: string }
+step current_branch type=tool {
+  tool: git.current_branch
+  out: { branch: string }
 }
 
-step push_branch type=tool {
-  tool: git.push_current_branch
-  out: { branch: string, remote: string }
+step summarize_diff type=tool {
+  tool: git.diff_summary
+  with: { base: inputs.base_branch }
+  out: { base: string, summary: string, files: [string] }
 }
 
-branch continue_or_abort {
-  if: steps.draft_pr.title != ""
-  then: create_pr
-  else: abort_empty_title
-}
+step draft_pr type=llm {
+  prompt: |
+    Prepare a pull request draft for branch {{ steps.current_branch.branch }}
+    targeting {{ inputs.base_branch }}.
 
-step create_pr type=tool {
-  tool: github.create_pr
-  with: {
-    title: steps.draft_pr.title,
-    body: steps.draft_pr.body,
-    base: inputs.base_branch,
-    draft: inputs.draft,
-    draft_result_path: steps.draft_pr.result_path
+    PR template present: {{ steps.check_template.exists }}
+    Changed files: {{ steps.summarize_diff.files }}
+
+    Diff summary:
+    {{ steps.summarize_diff.summary }}
+  input: {
+    branch: steps.current_branch.branch,
+    base_branch: inputs.base_branch,
+    template_exists: steps.check_template.exists,
+    diff_summary: steps.summarize_diff.summary,
+    changed_files: "{{ steps.summarize_diff.files }}"
   }
-  out: { pr_number: number, pr_url: string }
-  next: finish
-}
-
-step abort_empty_title type=tool {
-  tool: util.fail
-  with: { message: "PR title must not be empty." }
-  out: { message: string }
-  next: fail
-  fail_message: "Generated PR title was empty."
-}
-
-step abort_missing_llm type=tool {
-  tool: util.fail
-  with: { message: "Unable to generate a PR description." }
-  out: { message: string }
-  next: fail
-  fail_message: "LLM drafting failed."
+  schema: { title: string, body: string }
 }
 
 step finish type=tool {
   tool: util.complete
-  with: { pr_url: steps.create_pr.pr_url }
-  out: { pr_url: string }
+  with: {
+    branch: steps.current_branch.branch,
+    title: steps.draft_pr.title,
+    body: steps.draft_pr.body,
+    diff_summary: steps.summarize_diff.summary
+  }
+  out: {
+    branch: string,
+    title: string,
+    body: string,
+    diff_summary: string
+  }
 }
 
 output {
-  pr_url: steps.finish.pr_url
+  branch: steps.finish.branch
+  title: steps.finish.title
+  body: steps.finish.body
+  diff_summary: steps.finish.diff_summary
 }
 ```

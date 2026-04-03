@@ -76,6 +76,148 @@ output {
   assert.equal(artifact.steps[1].outputs.title, "Demo PR");
 });
 
+test("runRuneflow resolves template interpolation and projects docs to llm steps", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: projection
+description: Projection workflow
+version: 0.1
+inputs:
+  change_count: number
+outputs:
+  title: string
+  body: string
+---
+
+# Operator Notes
+
+Use the repository context to draft a concise pull request.
+
+\`\`\`runeflow
+step setup type=tool {
+  tool: util.complete
+  with: { branch: "feature/runtime-owned", ready: true }
+  out: { branch: string, ready: boolean }
+}
+
+step draft type=llm {
+  prompt: "Draft a PR for {{ steps.setup.branch }} with {{ inputs.change_count }} changes."
+  input: {
+    ready: "{{ steps.setup.ready }}",
+    count: "{{ inputs.change_count }}",
+    summary: "Branch {{ steps.setup.branch }} has {{ inputs.change_count }} changes."
+  }
+  schema: { title: string, body: string }
+}
+
+output {
+  title: steps.draft.title
+  body: steps.draft.body
+}
+\`\`\`
+`);
+
+  const runtime = {
+    llm: async ({ prompt, input, docs, context }) => {
+      assert.equal(prompt, "Draft a PR for feature/runtime-owned with 3 changes.");
+      assert.deepEqual(input, {
+        ready: true,
+        count: 3,
+        summary: "Branch feature/runtime-owned has 3 changes.",
+      });
+      assert.match(docs, /Operator Notes/);
+      assert.equal(context.docs, docs);
+      assert.equal(context.metadata.name, "projection");
+      return {
+        title: "PR for feature/runtime-owned",
+        body: `Docs available: ${docs.includes("draft a concise pull request")}`,
+      };
+    },
+  };
+
+  const run = await runRuneflow(parsed, { change_count: 3 }, runtime, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.deepEqual(run.outputs, {
+    title: "PR for feature/runtime-owned",
+    body: "Docs available: true",
+  });
+});
+
+test("runRuneflow preserves native types for exact templates and strings for mixed templates", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: templates
+description: Template bindings
+version: 0.1
+inputs:
+  flag: boolean
+  count: number
+  branch: string
+  data:
+    label: string
+  items:
+    - string
+outputs:
+  flag: boolean
+  count: number
+  data:
+    label: string
+  items:
+    - string
+  message: string
+---
+
+\`\`\`runeflow
+step capture type=tool {
+  tool: util.complete
+  with: {
+    flag: "{{ inputs.flag }}",
+    count: "{{ inputs.count }}",
+    data: "{{ inputs.data }}",
+    items: "{{ inputs.items }}",
+    message: "Deploy {{ inputs.branch }} with {{ inputs.count }} changes"
+  }
+  out: {
+    flag: boolean,
+    count: number,
+    data: { label: string },
+    items: [string],
+    message: string
+  }
+}
+
+output {
+  flag: steps.capture.flag
+  count: steps.capture.count
+  data: steps.capture.data
+  items: steps.capture.items
+  message: steps.capture.message
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(
+    parsed,
+    {
+      flag: true,
+      count: 5,
+      branch: "feature/templates",
+      data: { label: "release" },
+      items: ["one", "two"],
+    },
+    {},
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.strictEqual(typeof run.outputs.flag, "boolean");
+  assert.strictEqual(typeof run.outputs.count, "number");
+  assert.deepEqual(run.outputs.data, { label: "release" });
+  assert.deepEqual(run.outputs.items, ["one", "two"]);
+  assert.equal(run.outputs.message, "Deploy feature/templates with 5 changes");
+});
+
 test("runRuneflow retries llm validation failure and uses fallback", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
   let attempts = 0;
@@ -186,4 +328,43 @@ output {
   assert.equal(run.status, "success");
   assert.deepEqual(run.steps.map((step) => step.id), ["choose", "primary", "finish"]);
   assert.equal(run.outputs.result, "primary-done");
+});
+
+test("runRuneflow lets user runtime tools override built-in tools", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: override
+description: Override tools
+version: 0.1
+inputs: {}
+outputs:
+  message: string
+---
+
+\`\`\`runeflow
+step finish type=tool {
+  tool: util.complete
+  with: { message: "built-in" }
+  out: { message: string }
+}
+
+output {
+  message: steps.finish.message
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(
+    parsed,
+    {},
+    {
+      tools: {
+        "util.complete": async () => ({ message: "overridden" }),
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.message, "overridden");
 });

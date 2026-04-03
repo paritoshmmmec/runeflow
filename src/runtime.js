@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError, ValidationError } from "./errors.js";
-import { evaluateExpression, looksLikeExpression } from "./expression.js";
+import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
 import { validateShape } from "./schema.js";
 import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
 import { validateSkill } from "./validator.js";
@@ -25,6 +26,10 @@ function resolveBindings(value, state) {
       resolved[key] = resolveBindings(child, state);
     }
     return resolved;
+  }
+
+  if (typeof value === "string" && hasTemplateExpressions(value)) {
+    return resolveTemplate(value, state);
   }
 
   if (typeof value === "string" && looksLikeExpression(value)) {
@@ -66,17 +71,37 @@ async function invokeTool(step, resolvedInput, runtime, state) {
   });
 }
 
-async function invokeLlm(step, resolvedInput, runtime, state) {
+function projectLlmContext(definition) {
+  return {
+    docs: definition.docs,
+    metadata: deepClone(definition.metadata),
+    source_path: definition.sourcePath ?? null,
+  };
+}
+
+function createRuntime(runtime = {}, options = {}) {
+  return {
+    ...runtime,
+    tools: {
+      ...createBuiltinTools({ cwd: options.cwd }),
+      ...(runtime.tools ?? {}),
+    },
+  };
+}
+
+async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtime, state) {
   if (typeof runtime.llm !== "function") {
     throw new RuntimeError("No LLM handler registered for llm steps.");
   }
 
   return runtime.llm({
     step,
-    prompt: step.prompt,
+    prompt: resolvedPrompt,
     input: resolvedInput,
     schema: step.schema,
     state,
+    docs: definition.docs,
+    context: projectLlmContext(definition),
   });
 }
 
@@ -100,6 +125,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   }
 
   const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
+  const effectiveRuntime = createRuntime(runtime, options);
   const run = {
     run_id: createRunId(),
     runeflow: {
@@ -129,6 +155,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     let lastError = null;
     let finalOutputs = null;
     let resolvedInput = {};
+    let resolvedPrompt = null;
 
     while (attempts <= (step.retry ?? 0)) {
       attempts += 1;
@@ -136,14 +163,15 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       try {
         if (step.kind === "tool") {
           resolvedInput = resolveBindings(step.with ?? {}, state);
-          finalOutputs = await invokeTool(step, resolvedInput, runtime, state);
+          finalOutputs = await invokeTool(step, resolvedInput, effectiveRuntime, state);
           const issues = validateShape(finalOutputs, step.out, `steps.${step.id}`);
           if (issues.length) {
             throw new RuntimeError(`Tool output failed validation: ${issues.join("; ")}`);
           }
         } else if (step.kind === "llm") {
+          resolvedPrompt = resolveBindings(step.prompt, state);
           resolvedInput = resolveBindings(step.input ?? {}, state);
-          finalOutputs = await invokeLlm(step, resolvedInput, runtime, state);
+          finalOutputs = await invokeLlm(definition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state);
           const issues = validateShape(finalOutputs, step.schema, `steps.${step.id}`);
           if (issues.length) {
             throw new RuntimeError(`LLM output failed validation: ${issues.join("; ")}`);
@@ -181,8 +209,9 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     run.steps.push(stepRun);
 
     if (lastError) {
+      const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
       if (!step.fallback || step.fallback === "fail") {
-        failRun(run, step.failMessage ?? lastError.message, lastError);
+        failRun(run, resolvedFailMessage ?? lastError.message, lastError);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
         return run;
@@ -194,7 +223,8 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
 
     if (step.kind === "branch") {
       if (finalOutputs.target === "fail") {
-        failRun(run, step.failMessage ?? `Branch '${step.id}' selected fail target.`);
+        const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
+        failRun(run, resolvedFailMessage ?? `Branch '${step.id}' selected fail target.`);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
         return run;
@@ -205,7 +235,8 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     }
 
     if (step.next === "fail") {
-      failRun(run, step.failMessage ?? `Step '${step.id}' terminated the run.`);
+      const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
+      failRun(run, resolvedFailMessage ?? `Step '${step.id}' terminated the run.`);
       run.outputs = {};
       run.artifact_path = await writeRunArtifact(run, runsDir);
       return run;

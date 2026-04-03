@@ -1,4 +1,4 @@
-import { collectExpressionPaths, looksLikeExpression, parseExpression } from "./expression.js";
+import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression } from "./expression.js";
 import { shapeHasPath } from "./schema.js";
 import { isPlainObject } from "./utils.js";
 
@@ -26,6 +26,19 @@ function collectReferences(value, issues, location) {
     if (isPlainObject(current)) {
       for (const [key, child] of Object.entries(current)) {
         walk(child, `${currentLocation}.${key}`);
+      }
+      return;
+    }
+
+    if (typeof current === "string" && hasTemplateExpressions(current)) {
+      try {
+        references.push({
+          expression: current,
+          paths: collectTemplatePaths(current),
+          location: currentLocation,
+        });
+      } catch (error) {
+        issues.push(`${currentLocation}: ${error.message}`);
       }
       return;
     }
@@ -226,7 +239,12 @@ export function validateSkill(definition) {
     }
 
     if (step.kind === "llm") {
+      references.push(...collectReferences(step.prompt ?? "", issues, `step '${step.id}' prompt`));
       references.push(...collectReferences(step.input ?? {}, issues, `step '${step.id}' input`));
+    }
+
+    if (step.failMessage) {
+      references.push(...collectReferences(step.failMessage, issues, `step '${step.id}' fail_message`));
     }
 
     if (step.kind === "branch" && typeof step.if === "string") {
