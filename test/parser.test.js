@@ -39,6 +39,44 @@ test("parseRuneflow extracts metadata docs and workflow", () => {
   assert.equal(parsed.workflow.steps[0].tool, "file.exists");
 });
 
+test("parseRuneflow preserves default and step-level llm config", () => {
+  const parsed = parseRuneflow(`---
+name: llm-config
+description: LLM config parsing
+llm:
+  provider: anthropic
+  router: false
+  model: sonnet
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  llm: {
+    provider: cerebras,
+    router: false,
+    model: qwen
+  }
+  prompt: "hi"
+  schema: { title: string }
+}
+
+output {
+}
+\`\`\`
+`);
+
+  assert.deepEqual(parsed.metadata.llm, {
+    provider: "anthropic",
+    router: false,
+    model: "sonnet",
+  });
+  assert.deepEqual(parsed.workflow.steps[0].llm, {
+    provider: "cerebras",
+    router: false,
+    model: "qwen",
+  });
+});
+
 test("parseRuneflow accepts legacy skill blocks for compatibility", () => {
   const parsed = parseRuneflow(`---
 name: legacy

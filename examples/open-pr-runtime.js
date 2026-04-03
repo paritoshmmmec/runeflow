@@ -1,4 +1,5 @@
 import { runCerebrasJsonCompletion } from "./cerebras.js";
+import { runAnthropicJsonCompletion } from "./anthropic.js";
 
 function buildMessages({ prompt, input, docs, context }) {
   const operatorNotes = docs?.trim()
@@ -29,11 +30,25 @@ function buildMessages({ prompt, input, docs, context }) {
   ];
 }
 
-export async function llm({ prompt, input, docs, context }) {
-  const parsed = await runCerebrasJsonCompletion(buildMessages({ prompt, input, docs, context }));
+async function dispatchLlm({ llm, systemPrompt, userPrompt }) {
+  switch (llm.provider) {
+    case "cerebras":
+      return runCerebrasJsonCompletion({ systemPrompt, userPrompt, llm });
+    case "anthropic":
+      return runAnthropicJsonCompletion({ systemPrompt, userPrompt, llm });
+    default:
+      throw new Error(`Unsupported LLM provider '${llm.provider}'.`);
+  }
+}
+
+async function handleDraft({ llm, prompt, input, docs, context }) {
+  const parsed = await dispatchLlm({
+    llm,
+    ...buildMessages({ prompt, input, docs, context }),
+  });
 
   if (typeof parsed.title !== "string" || typeof parsed.body !== "string") {
-    throw new Error("Cerebras API JSON response must include string fields 'title' and 'body'.");
+    throw new Error("LLM JSON response must include string fields 'title' and 'body'.");
   }
 
   return {
@@ -41,3 +56,8 @@ export async function llm({ prompt, input, docs, context }) {
     body: parsed.body,
   };
 }
+
+export const llms = {
+  cerebras: handleDraft,
+  anthropic: handleDraft,
+};

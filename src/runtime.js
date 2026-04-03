@@ -89,13 +89,27 @@ function createRuntime(runtime = {}, options = {}) {
   };
 }
 
+function resolveLlmConfig(definition, step) {
+  return step.llm ?? definition.metadata.llm ?? null;
+}
+
 async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtime, state) {
-  if (typeof runtime.llm !== "function") {
-    throw new RuntimeError("No LLM handler registered for llm steps.");
+  const llmConfig = resolveLlmConfig(definition, step);
+
+  if (!llmConfig) {
+    throw new RuntimeError(`Step '${step.id}' has no llm configuration.`);
   }
 
-  return runtime.llm({
+  const provider = llmConfig.provider;
+  const handler = runtime.llms?.[provider];
+
+  if (typeof handler !== "function") {
+    throw new RuntimeError(`No LLM handler registered for provider '${provider}'.`);
+  }
+
+  return handler({
     step,
+    llm: deepClone(llmConfig),
     prompt: resolvedPrompt,
     input: resolvedInput,
     schema: step.schema,

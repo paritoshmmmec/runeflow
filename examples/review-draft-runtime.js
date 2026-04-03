@@ -1,4 +1,5 @@
 import { runCerebrasJsonCompletion } from "./cerebras.js";
+import { runAnthropicJsonCompletion } from "./anthropic.js";
 
 function buildMessages({ prompt, input, docs, context }) {
   const operatorNotes = docs?.trim()
@@ -30,8 +31,22 @@ function buildMessages({ prompt, input, docs, context }) {
   };
 }
 
-export async function llm({ prompt, input, docs, context }) {
-  const parsed = await runCerebrasJsonCompletion(buildMessages({ prompt, input, docs, context }));
+async function dispatchLlm({ llm, systemPrompt, userPrompt }) {
+  switch (llm.provider) {
+    case "cerebras":
+      return runCerebrasJsonCompletion({ systemPrompt, userPrompt, llm });
+    case "anthropic":
+      return runAnthropicJsonCompletion({ systemPrompt, userPrompt, llm });
+    default:
+      throw new Error(`Unsupported LLM provider '${llm.provider}'.`);
+  }
+}
+
+async function handleReview({ llm, prompt, input, docs, context }) {
+  const parsed = await dispatchLlm({
+    llm,
+    ...buildMessages({ prompt, input, docs, context }),
+  });
 
   if (
     typeof parsed.summary !== "string" ||
@@ -40,7 +55,7 @@ export async function llm({ prompt, input, docs, context }) {
     !parsed.risks.every((item) => typeof item === "string") ||
     !parsed.test_focus.every((item) => typeof item === "string")
   ) {
-    throw new Error("Cerebras API JSON response must include summary:string, risks:string[], and test_focus:string[].");
+    throw new Error("LLM JSON response must include summary:string, risks:string[], and test_focus:string[].");
   }
 
   return {
@@ -49,3 +64,8 @@ export async function llm({ prompt, input, docs, context }) {
     test_focus: parsed.test_focus,
   };
 }
+
+export const llms = {
+  cerebras: handleReview,
+  anthropic: handleReview,
+};

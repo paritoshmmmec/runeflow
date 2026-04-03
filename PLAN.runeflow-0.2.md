@@ -92,3 +92,7 @@ This milestone proves one flagship use case: local PR-prep automation for agent 
   - `validate` passes on the flagship example
   - `run` succeeds with the sample LLM runtime
   - output artifact contains branch metadata and drafted PR content
+
+## Follow-Up Notes
+
+- Standardize LLM provider invocation so each adapter follows one shared contract for prompt assembly, structured JSON output, model selection, and router behavior.

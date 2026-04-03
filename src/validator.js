@@ -80,6 +80,26 @@ function getStepOutputSchema(step) {
   return null;
 }
 
+function validateLlmConfig(config, location, issues) {
+  if (!isPlainObject(config)) {
+    issues.push(`${location} must be an object`);
+    return;
+  }
+
+  if (typeof config.provider !== "string" || !config.provider.trim()) {
+    issues.push(`${location}.provider is required`);
+  }
+
+  const router = config.router ?? false;
+  if (typeof router !== "boolean") {
+    issues.push(`${location}.router must be a boolean`);
+  }
+
+  if (router !== true && (typeof config.model !== "string" || !config.model.trim())) {
+    issues.push(`${location}.model is required when router is false`);
+  }
+}
+
 function validateReferencePath(pathExpression, availableInputs, availableSteps, issues, location) {
   const segments = pathExpression.split(".");
 
@@ -141,6 +161,10 @@ export function validateSkill(definition) {
     issues.push("metadata.outputs must be an object schema");
   }
 
+  if (metadata.llm !== null && metadata.llm !== undefined) {
+    validateLlmConfig(metadata.llm, "metadata.llm", issues);
+  }
+
   if (!workflow.steps.length) {
     issues.push("workflow must declare at least one step or branch");
   }
@@ -179,6 +203,12 @@ export function validateSkill(definition) {
       if (!isPlainObject(step.schema)) {
         issues.push(`step '${step.id}' must declare a schema`);
       }
+
+      if (step.llm !== undefined && step.llm !== null) {
+        validateLlmConfig(step.llm, `step '${step.id}' llm`, issues);
+      }
+    } else if (step.llm !== undefined && step.llm !== null) {
+      issues.push(`step '${step.id}' may only declare llm config when kind is 'llm'`);
     }
 
     if (step.kind === "branch") {
@@ -198,6 +228,11 @@ export function validateSkill(definition) {
     if (step.retry !== undefined && (!Number.isInteger(step.retry) || step.retry < 0)) {
       issues.push(`step '${step.id}' retry must be a non-negative integer`);
     }
+  }
+
+  const llmSteps = workflow.steps.filter((step) => step.kind === "llm");
+  if (llmSteps.length > 0 && !metadata.llm && llmSteps.some((step) => !step.llm)) {
+    issues.push("metadata.llm is required when llm steps do not declare their own llm config");
   }
 
   for (const step of workflow.steps) {

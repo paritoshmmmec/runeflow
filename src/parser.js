@@ -272,6 +272,7 @@ export function parseSkill(source, options = {}) {
       version: frontmatter.version ?? "0.1",
       inputs: frontmatter.inputs ?? {},
       outputs: frontmatter.outputs ?? {},
+      llm: frontmatter.llm ?? null,
     },
     docs,
     workflow,

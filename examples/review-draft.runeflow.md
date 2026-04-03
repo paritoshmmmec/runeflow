@@ -11,6 +11,10 @@ outputs:
     - string
   test_focus:
     - string
+llm:
+  provider: anthropic
+  router: false
+  model: claude-3-7-sonnet-latest
 ---
 
 # Draft Review
@@ -34,6 +38,11 @@ step summarize_diff type=tool {
 }
 
 step draft_review type=llm {
+  llm: {
+    provider: cerebras,
+    router: false,
+    model: qwen-3-235b-a22b-instruct-2507
+  }
   prompt: |
     Draft code review notes for branch {{ steps.current_branch.branch }}
     against {{ inputs.base_branch }}.

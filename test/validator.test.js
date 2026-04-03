@@ -118,3 +118,45 @@ output {
   assert.match(validation.issues.join("\n"), /unknown input reference 'inputs\.unknown'/);
   assert.match(validation.issues.join("\n"), /unknown step output path 'steps\.draft\.missing'/);
 });
+
+test("validateRuneflow enforces metadata and step llm config rules", () => {
+  const parsed = parseRuneflow(`---
+name: llm-config
+description: LLM config validation
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+llm:
+  provider: anthropic
+  router: false
+---
+
+\`\`\`runeflow
+step review type=tool {
+  llm: {
+    provider: cerebras
+  }
+  tool: mock.review
+  out: { result: string }
+}
+
+step draft type=llm {
+  llm: { provider: cerebras, router: "sometimes" }
+  prompt: "hi"
+  schema: { result: string }
+}
+
+output {
+  result: steps.review.result
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /metadata\.llm\.model is required when router is false/);
+  assert.match(validation.issues.join("\n"), /step 'review' may only declare llm config when kind is 'llm'/);
+  assert.match(validation.issues.join("\n"), /step 'draft' llm\.router must be a boolean/);
+});

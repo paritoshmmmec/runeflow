@@ -16,6 +16,10 @@ inputs:
   draft: boolean
 outputs:
   pr_url: string
+llm:
+  provider: mock-default
+  router: false
+  model: baseline
 ---
 
 \`\`\`runeflow
@@ -57,23 +61,25 @@ output {
         };
       },
     },
-    llm: async () => ({
-      title: "Demo PR",
-      body: "Body",
-    }),
+    llms: {
+      "mock-default": async ({ llm }) => ({
+        title: `Demo PR via ${llm.model}`,
+        body: "Body",
+      }),
+    },
   };
 
   const run = await runRuneflow(parsed, { draft: true }, runtime, { runsDir });
 
   assert.equal(run.status, "success");
   assert.equal(run.steps.length, 3);
-  assert.equal(run.outputs.pr_url, "https://example.test/draft/Demo%20PR");
+  assert.equal(run.outputs.pr_url, "https://example.test/draft/Demo%20PR%20via%20baseline");
   assert.match(run.steps[1].result_path, /draft\.json$/);
 
   const artifact = JSON.parse(await fs.readFile(run.artifact_path, "utf8"));
   assert.equal(artifact.run_id, run.run_id);
   assert.equal(artifact.runeflow.name, "linear");
-  assert.equal(artifact.steps[1].outputs.title, "Demo PR");
+  assert.equal(artifact.steps[1].outputs.title, "Demo PR via baseline");
 });
 
 test("runRuneflow resolves template interpolation and projects docs to llm steps", async () => {
@@ -87,6 +93,10 @@ inputs:
 outputs:
   title: string
   body: string
+llm:
+  provider: mock-default
+  router: false
+  model: concise
 ---
 
 # Operator Notes
@@ -118,20 +128,25 @@ output {
 `);
 
   const runtime = {
-    llm: async ({ prompt, input, docs, context }) => {
-      assert.equal(prompt, "Draft a PR for feature/runtime-owned with 3 changes.");
-      assert.deepEqual(input, {
-        ready: true,
-        count: 3,
-        summary: "Branch feature/runtime-owned has 3 changes.",
-      });
-      assert.match(docs, /Operator Notes/);
-      assert.equal(context.docs, docs);
-      assert.equal(context.metadata.name, "projection");
-      return {
-        title: "PR for feature/runtime-owned",
-        body: `Docs available: ${docs.includes("draft a concise pull request")}`,
-      };
+    llms: {
+      "mock-default": async ({ llm, prompt, input, docs, context }) => {
+        assert.equal(llm.provider, "mock-default");
+        assert.equal(llm.model, "concise");
+        assert.equal(llm.router, false);
+        assert.equal(prompt, "Draft a PR for feature/runtime-owned with 3 changes.");
+        assert.deepEqual(input, {
+          ready: true,
+          count: 3,
+          summary: "Branch feature/runtime-owned has 3 changes.",
+        });
+        assert.match(docs, /Operator Notes/);
+        assert.equal(context.docs, docs);
+        assert.equal(context.metadata.name, "projection");
+        return {
+          title: "PR for feature/runtime-owned",
+          body: `Docs available: ${docs.includes("draft a concise pull request")}`,
+        };
+      },
     },
   };
 
@@ -228,6 +243,10 @@ version: 0.1
 inputs: {}
 outputs:
   result: string
+llm:
+  provider: mock-default
+  router: false
+  model: baseline
 ---
 
 \`\`\`runeflow
@@ -258,9 +277,11 @@ output {
       "mock.publish": async ({ title }) => ({ result: title }),
       "mock.recover": async () => ({ result: "recovered" }),
     },
-    llm: async () => {
-      attempts += 1;
-      return attempts === 1 ? { title: 42 } : { title: 42 };
+    llms: {
+      "mock-default": async () => {
+        attempts += 1;
+        return attempts === 1 ? { title: 42 } : { title: 42 };
+      },
     },
   };
 
@@ -367,4 +388,60 @@ output {
 
   assert.equal(run.status, "success");
   assert.equal(run.outputs.message, "overridden");
+});
+
+test("runRuneflow uses step-level llm override over metadata default", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: llm-override
+description: Override llm
+version: 0.1
+inputs: {}
+outputs:
+  summary: string
+llm:
+  provider: default-provider
+  router: false
+  model: default-model
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  llm: {
+    provider: review-provider,
+    router: false,
+    model: review-model
+  }
+  prompt: "write"
+  schema: { summary: string }
+}
+
+output {
+  summary: steps.draft.summary
+}
+\`\`\`
+`);
+
+  const calls = [];
+  const run = await runRuneflow(
+    parsed,
+    {},
+    {
+      llms: {
+        "default-provider": async () => {
+          calls.push("default-provider");
+          return { summary: "default" };
+        },
+        "review-provider": async ({ llm }) => {
+          calls.push(`${llm.provider}:${llm.model}`);
+          return { summary: "review" };
+        },
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.summary, "review");
+  assert.deepEqual(calls, ["review-provider:review-model"]);
 });

@@ -9,6 +9,10 @@ outputs:
   title: string
   body: string
   diff_summary: string
+llm:
+  provider: cerebras
+  router: false
+  model: qwen-3-235b-a22b-instruct-2507
 ---
 
 # Prepare PR

@@ -21,10 +21,10 @@ function parseJsonResponse(content) {
   }
 }
 
-export async function runCerebrasJsonCompletion({ systemPrompt, userPrompt }) {
+export async function runCerebrasJsonCompletion({ systemPrompt, userPrompt, llm = {} }) {
   const apiKey = requireEnv("CEREBRAS_API_KEY");
   const baseUrl = process.env.CEREBRAS_API_BASE ?? DEFAULT_CEREBRAS_API_BASE;
-  const configuredModel = process.env.CEREBRAS_MODEL ?? DEFAULT_CEREBRAS_MODEL;
+  const configuredModel = llm.model ?? process.env.CEREBRAS_MODEL ?? DEFAULT_CEREBRAS_MODEL;
   const candidateModels = [
     configuredModel,
     ...FALLBACK_CEREBRAS_MODELS.filter((model) => model !== configuredModel),
