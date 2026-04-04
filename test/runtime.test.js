@@ -445,3 +445,80 @@ output {
   assert.equal(run.outputs.summary, "review");
   assert.deepEqual(calls, ["review-provider:review-model"]);
 });
+
+test("runRuneflow uses registry-backed tool output schema when out is omitted", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: registry-tool
+description: Registry-backed tool output validation
+version: 0.1
+inputs: {}
+outputs:
+  count: number
+---
+
+\`\`\`runeflow
+step count_prs type=tool {
+  tool: github.count_open_prs
+  with: { owner: "acme", repo: "runeflow" }
+}
+
+output {
+  count: steps.count_prs.count
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(
+    parsed,
+    {},
+    {
+      tools: {
+        "github.count_open_prs": async () => ({ count: 7 }),
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.count, 7);
+});
+
+test("runRuneflow validates registry-backed tool output shape", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: bad-registry-tool
+description: Registry-backed tool output validation failure
+version: 0.1
+inputs: {}
+outputs:
+  count: number
+---
+
+\`\`\`runeflow
+step count_prs type=tool {
+  tool: github.count_open_prs
+  with: { owner: "acme", repo: "runeflow" }
+}
+
+output {
+  count: steps.count_prs.count
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(
+    parsed,
+    {},
+    {
+      tools: {
+        "github.count_open_prs": async () => ({ count: "seven" }),
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "failed");
+  assert.match(run.error.message, /Tool output failed validation/);
+  assert.match(run.error.message, /expected number/);
+});

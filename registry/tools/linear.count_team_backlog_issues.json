@@ -1,0 +1,41 @@
+{
+  "name": "linear.count_team_backlog_issues",
+  "description": "Count issues in a Linear team backlog.",
+  "tags": ["linear", "issues", "planning"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "team_key": {
+        "type": "string",
+        "description": "Linear team key, for example ENG or PRODUCT."
+      },
+      "label": {
+        "type": "string",
+        "description": "Optional label to filter backlog issues."
+      }
+    },
+    "required": ["team_key"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "count": {
+        "type": "number",
+        "description": "Number of backlog issues matching the filter."
+      }
+    },
+    "required": ["count"],
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "input": {
+        "team_key": "ENG"
+      },
+      "output": {
+        "count": 34
+      }
+    }
+  ]
+}

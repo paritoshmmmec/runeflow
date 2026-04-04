@@ -1,5 +1,6 @@
 import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression } from "./expression.js";
 import { shapeHasPath } from "./schema.js";
+import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
 import { isPlainObject } from "./utils.js";
 
 const STEP_RUNTIME_FIELDS = new Set([
@@ -61,9 +62,9 @@ function collectReferences(value, issues, location) {
   return references;
 }
 
-function getStepOutputSchema(step) {
+function getStepOutputSchema(step, toolRegistry) {
   if (step.kind === "tool") {
-    return step.out ?? null;
+    return step.out ?? getToolOutputSchema(step.tool, toolRegistry);
   }
 
   if (step.kind === "llm") {
@@ -139,11 +140,12 @@ function validateReferencePath(pathExpression, availableInputs, availableSteps, 
   issues.push(`${location}: unsupported reference root in '${pathExpression}'`);
 }
 
-export function validateSkill(definition) {
+export function validateSkill(definition, options = {}) {
   const issues = [];
   const warnings = [];
   const { metadata, workflow } = definition;
   const seenStepIds = new Set();
+  const toolRegistry = loadToolRegistry(options);
 
   if (!metadata.name) {
     issues.push("metadata.name is required");
@@ -190,8 +192,12 @@ export function validateSkill(definition) {
         issues.push(`step '${step.id}' must declare a tool`);
       }
 
-      if (!isPlainObject(step.out)) {
-        issues.push(`step '${step.id}' must declare an out schema`);
+      if (step.out !== undefined && step.out !== null && !isPlainObject(step.out)) {
+        issues.push(`step '${step.id}' out must be an object schema`);
+      }
+
+      if (!step.out && !getToolOutputSchema(step.tool, toolRegistry)) {
+        issues.push(`step '${step.id}' must declare an out schema or reference a registered tool with an outputSchema`);
       }
     }
 
@@ -237,7 +243,7 @@ export function validateSkill(definition) {
 
   for (const step of workflow.steps) {
     const currentIndex = stepIndex.get(step.id);
-    const schema = getStepOutputSchema(step);
+    const schema = getStepOutputSchema(step, toolRegistry);
 
     const targetPairs = [];
 

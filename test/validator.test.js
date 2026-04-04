@@ -160,3 +160,57 @@ output {
   assert.match(validation.issues.join("\n"), /step 'review' may only declare llm config when kind is 'llm'/);
   assert.match(validation.issues.join("\n"), /step 'draft' llm\.router must be a boolean/);
 });
+
+test("validateRuneflow accepts registered tool output schema when out is omitted", () => {
+  const parsed = parseRuneflow(`---
+name: registry-backed
+description: Registry-backed tool contract
+version: 0.1
+inputs: {}
+outputs:
+  count: number
+---
+
+\`\`\`runeflow
+step count_prs type=tool {
+  tool: github.count_open_prs
+  with: { owner: "acme", repo: "runeflow" }
+}
+
+output {
+  count: steps.count_prs.count
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
+test("validateRuneflow rejects tool step without out when no registry contract exists", () => {
+  const parsed = parseRuneflow(`---
+name: missing-out
+description: Missing tool output schema
+version: 0.1
+inputs: {}
+outputs:
+  count: number
+---
+
+\`\`\`runeflow
+step count_prs type=tool {
+  tool: github.unknown_tool
+  with: {}
+}
+
+output {
+  count: steps.count_prs.count
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /must declare an out schema or reference a registered tool with an outputSchema/);
+});

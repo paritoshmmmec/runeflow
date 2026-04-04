@@ -1,0 +1,74 @@
+{
+  "name": "linear.list_team_issues",
+  "description": "List issues for a Linear team, optionally filtered by state or assignee.",
+  "tags": ["linear", "issues", "planning"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "team_key": {
+        "type": "string",
+        "description": "Linear team key, for example ENG or PRODUCT."
+      },
+      "state": {
+        "type": "string",
+        "description": "Optional workflow state filter such as Backlog, Todo, or In Progress."
+      },
+      "assignee_email": {
+        "type": "string",
+        "description": "Optional assignee email filter."
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of issues to return."
+      }
+    },
+    "required": ["team_key"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "issues": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "identifier": { "type": "string" },
+            "title": { "type": "string" },
+            "state": { "type": "string" },
+            "assignee_email": { "type": "string" },
+            "priority": { "type": "number" },
+            "url": { "type": "string" }
+          },
+          "required": ["id", "identifier", "title", "state", "url"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["issues"],
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "input": {
+        "team_key": "ENG",
+        "state": "Backlog",
+        "limit": 3
+      },
+      "output": {
+        "issues": [
+          {
+            "id": "9f6e36e7-cdbb-4d44-8a7e-b2db9f7ca1a6",
+            "identifier": "ENG-241",
+            "title": "Add host hooks to runeflow runtime",
+            "state": "Backlog",
+            "assignee_email": "owner@example.com",
+            "priority": 2,
+            "url": "https://linear.app/acme/issue/ENG-241"
+          }
+        ]
+      }
+    }
+  ]
+}

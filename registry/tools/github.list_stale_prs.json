@@ -1,0 +1,73 @@
+{
+  "name": "github.list_stale_prs",
+  "description": "List open pull requests whose latest update is older than a threshold.",
+  "tags": ["github", "pull-requests", "triage"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "owner": {
+        "type": "string",
+        "description": "Repository owner or organization login."
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repository name."
+      },
+      "days_since_update": {
+        "type": "number",
+        "description": "Minimum number of days since the PR was last updated."
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of pull requests to return."
+      }
+    },
+    "required": ["owner", "repo", "days_since_update"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "pull_requests": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "number": { "type": "number" },
+            "title": { "type": "string" },
+            "url": { "type": "string" },
+            "author": { "type": "string" },
+            "updated_at": { "type": "string" },
+            "days_since_update": { "type": "number" }
+          },
+          "required": ["number", "title", "url", "author", "updated_at", "days_since_update"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["pull_requests"],
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "input": {
+        "owner": "acme",
+        "repo": "runeflow",
+        "days_since_update": 7,
+        "limit": 5
+      },
+      "output": {
+        "pull_requests": [
+          {
+            "number": 142,
+            "title": "Add step lifecycle hooks",
+            "url": "https://github.com/acme/runeflow/pull/142",
+            "author": "paritosh",
+            "updated_at": "2026-04-01T14:35:00Z",
+            "days_since_update": 9
+          }
+        ]
+      }
+    }
+  ]
+}

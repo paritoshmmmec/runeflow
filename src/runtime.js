@@ -4,6 +4,7 @@ import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
 import { validateShape } from "./schema.js";
+import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
 import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
 import { validateSkill } from "./validator.js";
 
@@ -133,7 +134,8 @@ function inferBranchOutput(conditionResult, target) {
 }
 
 export async function runSkill(definition, inputs, runtime = {}, options = {}) {
-  const validation = validateSkill(definition);
+  const toolRegistry = loadToolRegistry(options);
+  const validation = validateSkill(definition, options);
   if (!validation.valid) {
     throw new ValidationError("Skill validation failed.", validation.issues);
   }
@@ -178,7 +180,8 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
         if (step.kind === "tool") {
           resolvedInput = resolveBindings(step.with ?? {}, state);
           finalOutputs = await invokeTool(step, resolvedInput, effectiveRuntime, state);
-          const issues = validateShape(finalOutputs, step.out, `steps.${step.id}`);
+          const toolOutputSchema = step.out ?? getToolOutputSchema(step.tool, toolRegistry);
+          const issues = validateShape(finalOutputs, toolOutputSchema, `steps.${step.id}`);
           if (issues.length) {
             throw new RuntimeError(`Tool output failed validation: ${issues.join("; ")}`);
           }

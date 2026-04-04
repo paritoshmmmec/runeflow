@@ -1,0 +1,46 @@
+{
+  "name": "github.count_open_prs",
+  "description": "Count open pull requests in a GitHub repository.",
+  "tags": ["github", "pull-requests", "triage"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "owner": {
+        "type": "string",
+        "description": "Repository owner or organization login."
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repository name."
+      },
+      "base": {
+        "type": "string",
+        "description": "Optional base branch to filter open pull requests."
+      }
+    },
+    "required": ["owner", "repo"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "count": {
+        "type": "number",
+        "description": "Number of open pull requests matching the filter."
+      }
+    },
+    "required": ["count"],
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "input": {
+        "owner": "acme",
+        "repo": "runeflow"
+      },
+      "output": {
+        "count": 12
+      }
+    }
+  ]
+}
