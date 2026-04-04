@@ -44,6 +44,34 @@ At a high level, Runeflow works like this:
 
 The longer walkthrough lives in [RETROSPECTIVE.md](/Users/paritosh/src/skill-language/RETROSPECTIVE.md).
 
+## Architecture
+
+Runeflow is intended to be run by a host application, which may be a CLI, a product backend, or an agentic codebase. The host decides when to load and run a skill, while the Runeflow runtime owns deterministic execution semantics.
+
+```mermaid
+flowchart LR
+    H["Host App or Agentic Codebase"]
+    S["Hybrid Skill File\nMarkdown + ```runeflow```"]
+    R["Runeflow Runtime"]
+    T["Tool Handlers"]
+    L["LLM Handlers"]
+    A["Run + Step Artifacts"]
+
+    H -->|"load / parse / validate / run"| S
+    H -->|"provide runtime env"| R
+    S -->|"definition + docs"| R
+    R -->|"invoke tool steps"| T
+    R -->|"invoke llm steps with resolved prompt/input/docs"| L
+    T -->|"structured outputs"| R
+    L -->|"schema-validated outputs"| R
+    R -->|"write artifacts"| A
+    R -->|"final outputs + status"| H
+```
+
+- Host: loads skill files, decides when to run them, and provides tool handlers, LLM handlers, cwd, credentials, and repo context.
+- Runeflow runtime: owns control flow, retries, branching, fallback, validation, interpolation, and artifact writing.
+- LLM handlers: generate bounded outputs for individual `llm` steps and do not interpret or enforce Runeflow semantics.
+
 ## What You Get
 
 - Hybrid authoring: Markdown docs plus a fenced `runeflow` block
