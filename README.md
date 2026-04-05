@@ -156,6 +156,8 @@ runeflow import <file>
 - [eval/open-pr.raw.md](/Users/paritosh/src/skill-language/eval/open-pr.raw.md): raw-skill baseline for evaluation
 - [eval/open-pr.js](/Users/paritosh/src/skill-language/eval/open-pr.js): raw vs Runeflow comparison harness
 - [eval/stale-pr-triage.runeflow.md](/Users/paritosh/src/skill-language/eval/stale-pr-triage.runeflow.md): simple multi-turn benchmark
+- [eval/adyntel-automation.runeflow.md](/Users/paritosh/src/skill-language/eval/adyntel-automation.runeflow.md): MCP tool orchestration benchmark
+- [eval/adyntel-automation.js](/Users/paritosh/src/skill-language/eval/adyntel-automation.js): test harness showcasing extreme token reduction via branching
 - [RETROSPECTIVE.md](/Users/paritosh/src/skill-language/RETROSPECTIVE.md): prototype learnings
 - [plans/PLAN.md](/Users/paritosh/src/skill-language/plans/PLAN.md): roadmap
 - [plans/EVAL.md](/Users/paritosh/src/skill-language/plans/EVAL.md): evaluation plan for raw skills vs Runeflow

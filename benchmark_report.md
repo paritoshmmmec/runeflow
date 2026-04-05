@@ -48,6 +48,23 @@ Runeflow consistently demonstrates significant **token efficiency gains** over t
 
 ---
 
+
+## 3. Task: `adyntel-automation`
+*Orchestration-heavy task mimicking MCP dynamic tool execution.*
+
+### Performance & Usage Table
+
+| Metric | Cerebras (Raw) | Cerebras (Runeflow) | OpenAI (Raw) | OpenAI (Runeflow) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Model** | `qwen-3-235b...` | `qwen-3-235b...` | `gpt-4o` | `gpt-4o` |
+| **Input Tokens** | 821 | 139 (**-83%**) | 810 | 128 (**-84%**) |
+
+### Key Observations
+- **Extreme Architecture Bloat Mitigation**: When using raw skills for dynamic orchestration (like querying an MCP tool connection state, reading schemas, and authorizing), the prompt size balloons massively. 
+- **The Runeflow Advantage**: By handling MCP auth checks through native execution branching, Runeflow avoids sending instructions about "how to behave" to the LLM, reducing the token overhead by over 80%.
+
+---
+
 ## Conclusion
 
 Runeflow is highly effective for **complex, context-heavy tasks** where input token reduction directly translates to cost savings and potentially faster model response times. For simple tasks, it maintains performance parity while providing the benefits of structured execution and artifact tracking.
