@@ -1,4 +1,5 @@
 import YAML from "yaml";
+import { resolveWorkflowBlocks } from "./blocks.js";
 import { SkillSyntaxError } from "./errors.js";
 import { countIndent, normalizeNewlines } from "./utils.js";
 
@@ -193,6 +194,28 @@ function parseStep(header, body) {
   };
 }
 
+function parseBlockTemplate(header, body) {
+  const match = header.match(/^block\s+([A-Za-z_][A-Za-z0-9_-]*)(?:\s+(.*))?$/);
+
+  if (!match) {
+    throw new SkillSyntaxError(`Invalid block declaration '${header}'.`);
+  }
+
+  const [, id, attributesSource = ""] = match;
+  const attributes = parseHeaderAttributes(attributesSource);
+  const properties = parseBlockProperties(body);
+
+  return {
+    id,
+    kind: attributes.type ?? null,
+    retry: attributes.retry ? Number(attributes.retry) : 0,
+    fallback: attributes.fallback ?? null,
+    next: properties.next ?? attributes.next ?? null,
+    failMessage: properties.fail_message ?? null,
+    ...properties,
+  };
+}
+
 function parseBranch(header, body) {
   const match = header.match(/^branch\s+([A-Za-z_][A-Za-z0-9_-]*)$/);
 
@@ -221,6 +244,7 @@ function parseWorkflow(workflowSource) {
 
   const source = normalizeNewlines(workflowSource);
   const steps = [];
+  const blocks = [];
   let output = {};
   let index = 0;
 
@@ -247,6 +271,8 @@ function parseWorkflow(workflowSource) {
       steps.push(parseStep(header, body));
     } else if (header.startsWith("branch ")) {
       steps.push(parseBranch(header, body));
+    } else if (header.startsWith("block ")) {
+      blocks.push(parseBlockTemplate(header, body));
     } else if (header === "output") {
       output = parseOutputBlock(body);
     } else {
@@ -256,7 +282,7 @@ function parseWorkflow(workflowSource) {
     index = blockEnd + 1;
   }
 
-  return { steps, output };
+  return { steps, output, blocks };
 }
 
 function extractDocBlocks(markdownBody) {
@@ -272,7 +298,7 @@ export function parseSkill(source, options = {}) {
   const { frontmatter, remainder } = extractFrontmatter(source);
   const { docs: rawDocs, workflowSource } = extractRuneflowBlock(remainder);
   const { docBlocks, cleanedBody } = extractDocBlocks(rawDocs);
-  const workflow = parseWorkflow(workflowSource);
+  const workflow = resolveWorkflowBlocks(parseWorkflow(workflowSource));
 
   return {
     sourcePath: options.sourcePath ?? null,

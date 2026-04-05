@@ -57,16 +57,16 @@ Runeflow consistently demonstrates significant **token efficiency gains** over t
 | Metric | Cerebras (Raw) | Cerebras (Runeflow) | OpenAI (Raw) | OpenAI (Runeflow) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Model** | `qwen-3-235b...` | `qwen-3-235b...` | `gpt-4o` | `gpt-4o` |
-| **Status** | ⚠️ Halted (Bad Tool Loop) | ⚠️ Rate Limited | ✅ Success | ✅ Success |
-| **Latency (Total)** | 4,036ms | N/A | 1,799ms | 596ms |
+| **Status** | ⚠️ Schema OK, task refused in output | ✅ Success | ✅ Success | ✅ Success |
+| **Latency (Total)** | 722ms | 290ms | 1,799ms | 596ms |
 | **Input Tokens** | 821 | 139 (**-83%**) | 810 | 128 (**-84%**) |
-| **Output Tokens**| 33 | N/A | 48 | 23 |
-| **Total Tokens** | 854 | N/A | 858 | 151 (**-82%**) |
+| **Output Tokens**| 33 | 20 | 48 | 23 |
+| **Total Tokens** | 854 | 159 (**-81%**) | 858 | 151 (**-82%**) |
 
 ### Key Observations
 - **Context Scope (Orchestration Hiding)**: The Raw baseline forces the LLM to read the *entire* MCP integration markdown doc, teaching it how to authenticate and fetch tools dynamically. Runeflow hides all of that logic inside the Javascript execution layer, passing *only* the atomic user query to the LLM. 
-- **Astronomical Speedup**: Because Runeflow strips out the massive MCP schema instructions entirely, the OpenAI latency dropped from 1.8 seconds down to a blistering 596ms (**3x faster**).
-- **The Zero-Shot Failure Trap**: The Cerebras (Raw) model actually failed internally. Since the Raw skills instructions say "always call RUBE_SEARCH_TOOLS first", the LLM returned a JSON warning saying it refused to execute until it searched tools. Runeflow forces deterministic execution, entirely bypassing the multi-turn failure trap that raw agents fall into.
+- **Astronomical Speedup**: Because Runeflow strips out the massive MCP schema instructions entirely, the OpenAI latency dropped from 1.8 seconds down to a blistering 596ms (**3x faster**). On Cerebras, the same run completed in **290ms** versus **722ms** for Raw (single-shot harness).
+- **The Zero-Shot Failure Trap**: The Cerebras (Raw) model still followed the doc’s “search tools first” guidance and returned JSON with a refusal-style `action_taken` even though the schema validated. Runeflow forces deterministic tool execution first, then a single bounded LLM call, producing a successful task outcome. Earlier runs against Cerebras sometimes hit **rate limits** when firing Raw and Runeflow back-to-back; spacing requests (for example an 8s delay between baselines) avoids that.
 
 ---
 

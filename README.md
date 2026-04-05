@@ -47,6 +47,8 @@ Our evaluation harness (comparing Runeflow against raw Zero-Shot AI commands) re
 - **Latency Acceleration (3x Faster)**: Removing the prompt bloat allows models like `gpt-4o` to reduce time-to-first-token and complete executions up to 3x faster (e.g. dropping from 1.8s down to 596ms). 
 - **Bypassing the "Zero-Shot Trap"**: Raw prompts frequently fall into infinite "tool discovery" loops or explicitly refuse to execute operations without querying tool schemas first. Runeflow's deterministic runtime completely eliminates this failure mode.
 
+Third-party inference APIs (including Cerebras) can **rate-limit** burst traffic. When replicating benchmarks locally, run the eval harnesses with a pause between baselines, for example `--delay-ms 8000` on `eval/adyntel-automation.js`, so raw and Runeflow runs do not back-to-back against the same quota.
+
 *See the full [Benchmark Report](./benchmark_report.md) for data breakdowns across multiple providers (OpenAI, Cerebras).*
 
 ## Architecture
@@ -121,12 +123,51 @@ Runeflow is intentionally narrow:
 - ordered execution
 - `tool` steps
 - `llm` steps with schema validation
+- `transform` steps (JavaScript expressions over resolved `input`, validated against `out`)
 - `branch` steps with explicit `then` and `else`
 - `retry`
 - `fallback`
 - terminal `fail`
 
 It does not aim to be a general orchestration engine.
+
+## Reusable blocks
+
+A **block** is a named step template with a full contract (`kind`, schemas, prompts, tool id, etc.). A **step** references it with `type=block` and a `block: name` field; step-level fields **override** the template (for example `next`, `prompt`, or `input`).
+
+```runeflow
+block greet_template type=llm {
+  prompt: "Reply with a short greeting for {{ inputs.name }}."
+  schema: { greeting: string }
+}
+
+step greet type=block {
+  block: greet_template
+}
+
+output {
+  greeting: steps.greet.greeting
+}
+```
+
+Blocks are expanded at parse time (same file only for now). Template kinds allowed: `tool`, `llm`, and `transform` (not `branch`). See [examples/block-demo.runeflow.md](./examples/block-demo.runeflow.md) and `npm run validate:block-demo`.
+
+**Later**: importable block libraries, versioning, and optional registry-backed block ids.
+
+## Trust model
+
+- **Skill files** define `transform` expressions and workflow structure—treat them as **trusted code** in the host process.
+- **`transform`** runs via `new Function` (full host JS). Set **`RUNEFLOW_DISABLE_TRANSFORM=1`** to fail runs that contain transform steps.
+- **`runeflow run --runtime ./path.js`** loads that module with Node `import()`—only load **trusted** runtimes.
+- Built-in **`file.exists`** resolves paths under the run **cwd**; absolute paths are resolved by Node and can read outside the project—avoid passing untrusted paths into tools.
+
+## Roadmap (next)
+
+- Block **imports** / shared libraries across files.
+- Stronger **sandboxing** or restricted transform dialect for untrusted skills.
+- Optional **cwd-only** filesystem policy for builtins.
+
+Deeper execution roadmap: [plans/PLAN.md](./plans/PLAN.md). Evaluation notes: [plans/EVAL.md](./plans/EVAL.md).
 
 ## Quickstart
 
@@ -151,24 +192,26 @@ runeflow import <file>
 - `.runeflow.md` is a convention, not a requirement. The parser cares about the fenced `runeflow` block, not the filename.
 - This repo is still a prototype. Optimize for learning and sharp examples, not for a frozen public contract.
 - A prototype tool registry now lives under `registry/` and starts with GitHub and Linear tool schemas.
-- Registry-backed tool steps can now omit `out` and derive their output contract from the registry. Current examples still declare output shape inline because the built-in local tools are not in the registry yet.
-- Evaluation scaffolding now lives under [eval/README.md](/Users/paritosh/src/skill-language/eval/README.md). Run `npm run eval:open-pr` to compare the first raw-vs-Runeflow benchmark, or use `--mode`, `--delay-ms`, and `--model` for provider-limited evaluations.
+- Registry-backed tool steps can omit `out` when the tool has an `outputSchema` in `registry/tools/` (including built-in `file.*`, `git.*`, and `util.fail` entries).
+- Evaluation scaffolding lives under [eval/README.md](./eval/README.md). Scripts: `npm run eval:open-pr`, `npm run eval:adyntel` (uses `--delay-ms 8000` by default), `npm run eval:3p`, `npm run eval:addresszen`. Use `--mode`, `--delay-ms`, and `--model` on the harness scripts as needed.
 
 ## Key Files
 
-- [src/parser.js](/Users/paritosh/src/skill-language/src/parser.js): frontmatter and fenced-block parsing
-- [src/validator.js](/Users/paritosh/src/skill-language/src/validator.js): static validation and reference checks
-- [src/runtime.js](/Users/paritosh/src/skill-language/src/runtime.js): execution engine and artifact writing
-- [src/builtins.js](/Users/paritosh/src/skill-language/src/builtins.js): built-in file and git tools
-- [examples/open-pr.runeflow.md](/Users/paritosh/src/skill-language/examples/open-pr.runeflow.md): flagship example
-- [examples/review-draft.runeflow.md](/Users/paritosh/src/skill-language/examples/review-draft.runeflow.md): second example
-- [eval/README.md](/Users/paritosh/src/skill-language/eval/README.md): evaluation assets and benchmark notes
-- [eval/open-pr.raw.md](/Users/paritosh/src/skill-language/eval/open-pr.raw.md): raw-skill baseline for evaluation
-- [eval/open-pr.js](/Users/paritosh/src/skill-language/eval/open-pr.js): raw vs Runeflow comparison harness
-- [eval/stale-pr-triage.runeflow.md](/Users/paritosh/src/skill-language/eval/stale-pr-triage.runeflow.md): simple multi-turn benchmark
-- [eval/adyntel-automation.runeflow.md](/Users/paritosh/src/skill-language/eval/adyntel-automation.runeflow.md): MCP tool orchestration benchmark
-- [eval/adyntel-automation.js](/Users/paritosh/src/skill-language/eval/adyntel-automation.js): test harness showcasing extreme token reduction via branching
-- [RETROSPECTIVE.md](/Users/paritosh/src/skill-language/RETROSPECTIVE.md): prototype learnings
-- [plans/PLAN.md](/Users/paritosh/src/skill-language/plans/PLAN.md): roadmap
-- [plans/EVAL.md](/Users/paritosh/src/skill-language/plans/EVAL.md): evaluation plan for raw skills vs Runeflow
-- [registry/README.md](/Users/paritosh/src/skill-language/registry/README.md): prototype tool registry notes
+- [src/parser.js](./src/parser.js): frontmatter and fenced-block parsing
+- [src/blocks.js](./src/blocks.js): named block templates and `type=block` resolution
+- [src/validator.js](./src/validator.js): static validation and reference checks
+- [src/runtime.js](./src/runtime.js): execution engine and artifact writing
+- [src/builtins.js](./src/builtins.js): built-in file and git tools
+- [examples/open-pr.runeflow.md](./examples/open-pr.runeflow.md): flagship example
+- [examples/block-demo.runeflow.md](./examples/block-demo.runeflow.md): reusable block + `type=block` step
+- [examples/review-draft.runeflow.md](./examples/review-draft.runeflow.md): second example
+- [eval/README.md](./eval/README.md): evaluation assets and benchmark notes
+- [eval/open-pr.raw.md](./eval/open-pr.raw.md): raw-skill baseline for evaluation
+- [eval/open-pr.js](./eval/open-pr.js): raw vs Runeflow comparison harness
+- [eval/stale-pr-triage.runeflow.md](./eval/stale-pr-triage.runeflow.md): simple multi-turn benchmark
+- [eval/adyntel-automation.runeflow.md](./eval/adyntel-automation.runeflow.md): MCP tool orchestration benchmark
+- [eval/adyntel-automation.js](./eval/adyntel-automation.js): test harness showcasing extreme token reduction via branching
+- [RETROSPECTIVE.md](./RETROSPECTIVE.md): prototype learnings
+- [plans/PLAN.md](./plans/PLAN.md): roadmap
+- [plans/EVAL.md](./plans/EVAL.md): evaluation plan for raw skills vs Runeflow
+- [registry/README.md](./registry/README.md): prototype tool registry notes

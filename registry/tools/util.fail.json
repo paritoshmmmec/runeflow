@@ -1,0 +1,13 @@
+{
+  "name": "util.fail",
+  "description": "Return a structured failure message (built-in helper).",
+  "tags": ["builtin", "control"],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "message": { "type": "string" }
+    },
+    "required": ["message"],
+    "additionalProperties": false
+  }
+}

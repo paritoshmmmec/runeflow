@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkflowBlocks } from "./blocks.js";
 import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
@@ -151,8 +152,12 @@ function inferBranchOutput(conditionResult, target) {
 }
 
 export async function runSkill(definition, inputs, runtime = {}, options = {}) {
+  const resolvedDefinition = {
+    ...definition,
+    workflow: resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }),
+  };
   const toolRegistry = loadToolRegistry(options);
-  const validation = validateSkill(definition, options);
+  const validation = validateSkill(resolvedDefinition, options);
   if (!validation.valid) {
     throw new ValidationError("Skill validation failed.", validation.issues);
   }
@@ -162,8 +167,8 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   const run = {
     run_id: createRunId(),
     runeflow: {
-      name: definition.metadata.name,
-      version: definition.metadata.version,
+      name: resolvedDefinition.metadata.name,
+      version: resolvedDefinition.metadata.version,
     },
     status: "running",
     inputs: deepClone(inputs),
@@ -174,11 +179,11 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     error: null,
   };
 
-  const stepIndex = new Map(definition.workflow.steps.map((step, index) => [step.id, index]));
+  const stepIndex = new Map(resolvedDefinition.workflow.steps.map((step, index) => [step.id, index]));
   let index = 0;
 
-  while (index < definition.workflow.steps.length) {
-    const step = definition.workflow.steps[index];
+  while (index < resolvedDefinition.workflow.steps.length) {
+    const step = resolvedDefinition.workflow.steps[index];
     const state = {
       inputs,
       stepMap: buildStepState(run.steps),
@@ -219,7 +224,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
         } else if (step.kind === "llm") {
           resolvedPrompt = resolveBindings(step.prompt, state);
           resolvedInput = resolveBindings(step.input ?? {}, state);
-          finalOutputs = await invokeLlm(definition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state);
+          finalOutputs = await invokeLlm(resolvedDefinition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state);
           const issues = validateShape(finalOutputs, step.schema, `steps.${step.id}`);
           if (issues.length) {
             throw new RuntimeError(`LLM output failed validation: ${issues.join("; ")}`);
@@ -230,6 +235,9 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           const target = matched ? step.then : step.else;
           finalOutputs = inferBranchOutput(matched, target);
         } else if (step.kind === "transform") {
+          if (process.env.RUNEFLOW_DISABLE_TRANSFORM === "1") {
+            throw new RuntimeError("Transform steps are disabled (RUNEFLOW_DISABLE_TRANSFORM=1).");
+          }
           const resolvedTransformInput = resolveBindings(step.input, state);
           try {
             // eslint-disable-next-line no-new-func
@@ -271,8 +279,8 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       outputs: lastError ? null : deepClone(finalOutputs),
       error: lastError ? serializeError(lastError) : null,
       projected_docs: step.kind === "llm" ? (step.docs
-        ? (definition.docBlocks?.[step.docs] ?? definition.docs)
-        : definition.docs) : undefined,
+        ? (resolvedDefinition.docBlocks?.[step.docs] ?? resolvedDefinition.docs)
+        : resolvedDefinition.docs) : undefined,
       hook_events: hookEvents,
       started_at: new Date().toISOString(),
       finished_at: new Date().toISOString(),
@@ -338,8 +346,8 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     stepMap: buildStepState(run.steps),
   };
 
-  run.outputs = resolveBindings(definition.workflow.output, finalState);
-  const outputIssues = validateShape(run.outputs, definition.metadata.outputs, "outputs");
+  run.outputs = resolveBindings(resolvedDefinition.workflow.output, finalState);
+  const outputIssues = validateShape(run.outputs, resolvedDefinition.metadata.outputs, "outputs");
   if (outputIssues.length) {
     failRun(run, `Final outputs failed validation: ${outputIssues.join("; ")}`);
     run.outputs = {};

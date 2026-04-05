@@ -899,3 +899,124 @@ output {
   assert.equal(run.status, "failed");
   assert.match(run.error.message, /transform 'reshape' expression failed/);
 });
+
+test("runRuneflow resolves type=block steps using named block templates", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: block-runtime
+description: Block runtime
+version: 0.1
+inputs:
+  name: string
+outputs:
+  greeting: string
+llm:
+  provider: mock
+  router: false
+  model: demo
+---
+
+\`\`\`runeflow
+block greet_template type=llm {
+  prompt: "Greet {{ inputs.name }}"
+  schema: { greeting: string }
+}
+
+step greet type=block {
+  block: greet_template
+}
+
+output {
+  greeting: steps.greet.greeting
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(
+    parsed,
+    { name: "Ada" },
+    {
+      llms: {
+        mock: async ({ prompt }) => {
+          assert.match(prompt, /Greet Ada/);
+          return { greeting: "Hello Ada" };
+        },
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.greeting, "Hello Ada");
+});
+
+test("runRuneflow uses builtin file.exists without out when registry provides outputSchema", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-file-reg-"));
+  await fs.writeFile(path.join(tempDir, "marker.txt"), "ok\n");
+
+  const parsed = parseRuneflow(`---
+name: file-builtin-registry
+description: file.exists via registry
+version: 0.1
+inputs: {}
+outputs:
+  exists: boolean
+---
+
+\`\`\`runeflow
+step check type=tool {
+  tool: file.exists
+  with: { path: "./marker.txt" }
+}
+
+output {
+  exists: steps.check.exists
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir, cwd: tempDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.exists, true);
+});
+
+test("transform: RUNEFLOW_DISABLE_TRANSFORM=1 blocks execution", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: transform-off
+description: Transform disabled
+version: 0.1
+inputs: {}
+outputs:
+  n: number
+---
+
+\`\`\`runeflow
+step t type=transform {
+  input: {}
+  expr: "1"
+  out: { n: number }
+}
+
+output {
+  n: steps.t.n
+}
+\`\`\`
+`);
+
+  const prev = process.env.RUNEFLOW_DISABLE_TRANSFORM;
+  process.env.RUNEFLOW_DISABLE_TRANSFORM = "1";
+  try {
+    const run = await runRuneflow(parsed, {}, {}, { runsDir });
+    assert.equal(run.status, "failed");
+    assert.match(run.error.message, /Transform steps are disabled/);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.RUNEFLOW_DISABLE_TRANSFORM;
+    } else {
+      process.env.RUNEFLOW_DISABLE_TRANSFORM = prev;
+    }
+  }
+});

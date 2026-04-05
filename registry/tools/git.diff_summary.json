@@ -1,0 +1,23 @@
+{
+  "name": "git.diff_summary",
+  "description": "Summarize diff between base ref and HEAD.",
+  "tags": ["builtin", "git"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "base": { "type": "string", "description": "Base ref for range base...HEAD" }
+    },
+    "required": ["base"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "base": { "type": "string" },
+      "summary": { "type": "string" },
+      "files": { "type": "array", "items": { "type": "string" } }
+    },
+    "required": ["base", "summary", "files"],
+    "additionalProperties": false
+  }
+}

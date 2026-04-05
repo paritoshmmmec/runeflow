@@ -1,3 +1,4 @@
+import { resolveWorkflowBlocks } from "./blocks.js";
 import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression } from "./expression.js";
 import { shapeHasPath } from "./schema.js";
 import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
@@ -147,7 +148,8 @@ function validateReferencePath(pathExpression, availableInputs, availableSteps, 
 export function validateSkill(definition, options = {}) {
   const issues = [];
   const warnings = [];
-  const { metadata, workflow } = definition;
+  const workflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} });
+  const { metadata } = definition;
   const seenStepIds = new Set();
   const toolRegistry = loadToolRegistry(options);
 
@@ -303,6 +305,10 @@ export function validateSkill(definition, options = {}) {
 
     if (step.kind === "llm") {
       references.push(...collectReferences(step.prompt ?? "", issues, `step '${step.id}' prompt`));
+      references.push(...collectReferences(step.input ?? {}, issues, `step '${step.id}' input`));
+    }
+
+    if (step.kind === "transform") {
       references.push(...collectReferences(step.input ?? {}, issues, `step '${step.id}' input`));
     }
 

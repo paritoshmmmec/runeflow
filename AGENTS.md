@@ -19,8 +19,10 @@ The goal is to keep the runtime small and easy to evolve during experimentation.
 The supported workflow model is intentionally narrow:
 
 - ordered execution
+- named **`block`** templates (`block id type=… { … }`) and **`step … type=block { block: id }`** (same-file resolution in `src/blocks.js`)
 - `tool` steps
 - `llm` steps with schema validation
+- `transform` steps (optional kill switch: **`RUNEFLOW_DISABLE_TRANSFORM=1`**)
 - `branch` steps with explicit `then` / `else` targets
 - `retry`
 - `fallback`
@@ -64,6 +66,7 @@ Each executed step should continue to write its own JSON artifact. Preserve this
 ## Important Files
 
 - `src/parser.js`: frontmatter + fenced-block parsing
+- `src/blocks.js`: block template expansion for `type=block` steps
 - `src/validator.js`: static validation, reference checking, shape enforcement
 - `src/expression.js`: `inputs.*` and `steps.*` reference resolution
 - `src/runtime.js`: execution engine and artifact writing
@@ -94,6 +97,7 @@ Before finishing meaningful changes, run:
 ```bash
 npm test
 node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md
+node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md
 ```
 
 If runtime behavior changes, also run:

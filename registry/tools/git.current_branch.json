@@ -1,0 +1,13 @@
+{
+  "name": "git.current_branch",
+  "description": "Return the current git branch name (requires attached HEAD).",
+  "tags": ["builtin", "git"],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "branch": { "type": "string" }
+    },
+    "required": ["branch"],
+    "additionalProperties": false
+  }
+}

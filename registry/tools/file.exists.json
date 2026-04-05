@@ -1,0 +1,13 @@
+{
+  "name": "file.exists",
+  "description": "Return whether a path exists relative to the workflow cwd (or absolute).",
+  "tags": ["builtin", "filesystem"],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "exists": { "type": "boolean" }
+    },
+    "required": ["exists"],
+    "additionalProperties": false
+  }
+}

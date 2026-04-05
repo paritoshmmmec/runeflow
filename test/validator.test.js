@@ -341,3 +341,31 @@ output {
   assert.match(validation.issues.join("\n"), /must declare an expr/);
   assert.match(validation.issues.join("\n"), /must declare an out schema/);
 });
+
+test("validateRuneflow rejects invalid references in transform step input", () => {
+  const parsed = parseRuneflow(`---
+name: transform-bad-input-ref
+description: Bad transform input ref
+version: 0.1
+inputs: {}
+outputs:
+  n: number
+---
+
+\`\`\`runeflow
+step bad type=transform {
+  input: steps.missing.x
+  expr: "1"
+  out: { n: number }
+}
+
+output {
+  n: steps.bad.n
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /unknown or forward step reference/);
+});

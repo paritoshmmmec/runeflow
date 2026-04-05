@@ -1,3 +1,4 @@
+export { resolveWorkflowBlocks } from "./blocks.js";
 export { importMarkdownRuneflow, importMarkdownSkill } from "./importer.js";
 export { parseRuneflow, parseSkill } from "./parser.js";
 export { runRuneflow, runSkill } from "./runtime.js";

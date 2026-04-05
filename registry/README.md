@@ -15,6 +15,7 @@ Current focus:
 
 - GitHub workflows
 - Linear workflows
+- Built-in runtime tools (`file.exists`, `git.*`, `util.fail`) so steps can omit `out` when using the default registry under `registry/tools/`
 
 Each entry should contain:
 
