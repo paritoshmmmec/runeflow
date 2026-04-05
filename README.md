@@ -142,6 +142,7 @@ runeflow import <file>
 - This repo is still a prototype. Optimize for learning and sharp examples, not for a frozen public contract.
 - A prototype tool registry now lives under `registry/` and starts with GitHub and Linear tool schemas.
 - Registry-backed tool steps can now omit `out` and derive their output contract from the registry. Current examples still declare output shape inline because the built-in local tools are not in the registry yet.
+- Evaluation scaffolding now lives under [eval/README.md](/Users/paritosh/src/skill-language/eval/README.md). Run `npm run eval:open-pr` to compare the first raw-vs-Runeflow benchmark, or use `--mode`, `--delay-ms`, and `--model` for provider-limited evaluations.
 
 ## Key Files
 
@@ -151,6 +152,11 @@ runeflow import <file>
 - [src/builtins.js](/Users/paritosh/src/skill-language/src/builtins.js): built-in file and git tools
 - [examples/open-pr.runeflow.md](/Users/paritosh/src/skill-language/examples/open-pr.runeflow.md): flagship example
 - [examples/review-draft.runeflow.md](/Users/paritosh/src/skill-language/examples/review-draft.runeflow.md): second example
+- [eval/README.md](/Users/paritosh/src/skill-language/eval/README.md): evaluation assets and benchmark notes
+- [eval/open-pr.raw.md](/Users/paritosh/src/skill-language/eval/open-pr.raw.md): raw-skill baseline for evaluation
+- [eval/open-pr.js](/Users/paritosh/src/skill-language/eval/open-pr.js): raw vs Runeflow comparison harness
+- [eval/stale-pr-triage.runeflow.md](/Users/paritosh/src/skill-language/eval/stale-pr-triage.runeflow.md): simple multi-turn benchmark
 - [RETROSPECTIVE.md](/Users/paritosh/src/skill-language/RETROSPECTIVE.md): prototype learnings
 - [plans/PLAN.md](/Users/paritosh/src/skill-language/plans/PLAN.md): roadmap
+- [plans/EVAL.md](/Users/paritosh/src/skill-language/plans/EVAL.md): evaluation plan for raw skills vs Runeflow
 - [registry/README.md](/Users/paritosh/src/skill-language/registry/README.md): prototype tool registry notes

@@ -1,0 +1,66 @@
+{
+  "task": "open-pr",
+  "comparedAt": "2026-04-05T11:28:24.448Z",
+  "cwd": "/Users/paritosh/src/skill-language",
+  "baseBranch": "main",
+  "requestedMode": "both",
+  "delayMs": 0,
+  "model": null,
+  "provider": "cerebras",
+  "rawSkill": {
+    "mode": "raw-skill",
+    "status": "success",
+    "durationMs": 72,
+    "outputs": {
+      "title": "Prepare PR for main",
+      "body": "Base branch: main\nTemplate present: false\nChanged files: \n\nDiff summary:\nNo changes."
+    },
+    "issues": [],
+    "usage": {
+      "llmCalls": 1,
+      "estimatedInputTokens": 219,
+      "estimatedOutputTokens": 34,
+      "estimatedTotalTokens": 253
+    },
+    "llmCalls": [
+      {
+        "provider": "cerebras",
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "durationMs": 72,
+        "estimatedInputTokens": 219,
+        "estimatedOutputTokens": 34,
+        "estimatedTotalTokens": 253
+      }
+    ]
+  },
+  "runeflow": {
+    "mode": "runeflow",
+    "status": "success",
+    "durationMs": 19,
+    "outputs": {
+      "branch": "main",
+      "title": "Prepare PR for main",
+      "body": "Base branch: main\nTemplate present: false\nChanged files: \n\nDiff summary:\nNo changes.",
+      "diff_summary": "No changes."
+    },
+    "issues": [],
+    "usage": {
+      "llmCalls": 1,
+      "estimatedInputTokens": 236,
+      "estimatedOutputTokens": 34,
+      "estimatedTotalTokens": 270
+    },
+    "llmCalls": [
+      {
+        "provider": "cerebras",
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "durationMs": 0,
+        "estimatedInputTokens": 236,
+        "estimatedOutputTokens": 34,
+        "estimatedTotalTokens": 270
+      }
+    ],
+    "runId": "run_20260405112824_b34ss5",
+    "artifactPath": "/var/folders/pl/qb1jh4w97m3g7r8qlwn8z4mr0000gn/T/runeflow-eval-JvShAb/run_20260405112824_b34ss5.json"
+  }
+}

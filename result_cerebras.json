@@ -1,0 +1,70 @@
+{
+  "task": "3p-updates",
+  "comparedAt": "2026-04-05T11:26:54.880Z",
+  "requestedMode": "both",
+  "delayMs": 0,
+  "model": null,
+  "provider": "cerebras",
+  "teamName": "Runeflow Platform",
+  "periodLabel": "Mar 29 - Apr 4",
+  "rawSkill": {
+    "mode": "raw-skill",
+    "status": "success",
+    "durationMs": 689,
+    "outputs": {
+      "emoji": "⚙️",
+      "progress": "Shipped the first in-repo tool registry slice for GitHub and Linear with schemas for PR and issue tracking. Implemented registry-backed tool contracts to reduce workflow duplication. Built initial evaluation harness comparing raw LLM vs Runeflow performance.",
+      "plans": "Finalize hybrid-skills roadmap focusing on host ownership, runtime semantics, and tool registry. Expand evaluation across GitHub, Linear, and mixed workflows. Add lifecycle hooks to enable host intervention without orchestration takeover.",
+      "problems": "Cerebras token-per-minute quotas limit fair benchmarking between raw and Runeflow executions. Exploring smaller models or sequential runs to mitigate bias. Some tool contract redundancy remains during transition to registry-first approach.",
+      "formatted": "⚙️ Runeflow Platform (Mar 29 - Apr 4)\nProgress: Shipped the first in-repo tool registry slice for GitHub and Linear with schemas for PR and issue tracking. Implemented registry-backed tool contracts to reduce workflow duplication. Built initial evaluation harness comparing raw LLM vs Runeflow performance.\nPlans: Finalize hybrid-skills roadmap focusing on host ownership, runtime semantics, and tool registry. Expand evaluation across GitHub, Linear, and mixed workflows. Add lifecycle hooks to enable host intervention without orchestration takeover.\nProblems: Cerebras token-per-minute quotas limit fair benchmarking between raw and Runeflow executions. Exploring smaller models or sequential runs to mitigate bias. Some tool contract redundancy remains during transition to registry-first approach."
+    },
+    "issues": [],
+    "usage": {
+      "llmCalls": 1,
+      "estimatedInputTokens": 825,
+      "estimatedOutputTokens": 300,
+      "estimatedTotalTokens": 1125
+    },
+    "llmCalls": [
+      {
+        "provider": "cerebras",
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "durationMs": 689,
+        "estimatedInputTokens": 825,
+        "estimatedOutputTokens": 300,
+        "estimatedTotalTokens": 1125
+      }
+    ]
+  },
+  "runeflow": {
+    "mode": "runeflow",
+    "status": "success",
+    "durationMs": 478,
+    "outputs": {
+      "emoji": "⚙️",
+      "progress": "Shipped first in-repo tool registry slice for GitHub and Linear with schemas for PRs, issues, and backlogs. Implemented registry-backed tool contracts to reduce schema duplication. Built initial raw-vs-Runeflow evaluation harness for token and reliability comparison.",
+      "plans": "Finalize hybrid-skills roadmap focusing on host ownership, runtime semantics, and registry priorities. Run comparative evaluations across GitHub, Linear, and mixed workflows. Add lifecycle hooks for host intervention around steps.",
+      "problems": "Cerebras token-per-minute quotas disrupt fair benchmarking between raw and Runeflow skills. Need smaller models or sequential runs for valid comparisons. Tool contract redundancy remains an issue without universal registry adoption.",
+      "formatted": "⚙️ Runeflow Platform (Mar 29 - Apr 4)\nProgress: Shipped first in-repo tool registry slice for GitHub and Linear with schemas for PRs, issues, and backlogs. Implemented registry-backed tool contracts to reduce schema duplication. Built initial raw-vs-Runeflow evaluation harness for token and reliability comparison.\nPlans: Finalize hybrid-skills roadmap focusing on host ownership, runtime semantics, and registry priorities. Run comparative evaluations across GitHub, Linear, and mixed workflows. Add lifecycle hooks for host intervention around steps.\nProblems: Cerebras token-per-minute quotas disrupt fair benchmarking between raw and Runeflow skills. Need smaller models or sequential runs for valid comparisons. Tool contract redundancy remains an issue without universal registry adoption."
+    },
+    "issues": [],
+    "usage": {
+      "llmCalls": 1,
+      "estimatedInputTokens": 508,
+      "estimatedOutputTokens": 306,
+      "estimatedTotalTokens": 814
+    },
+    "llmCalls": [
+      {
+        "provider": "cerebras",
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "durationMs": 467,
+        "estimatedInputTokens": 508,
+        "estimatedOutputTokens": 306,
+        "estimatedTotalTokens": 814
+      }
+    ],
+    "runId": "run_20260405112654_7djrcs",
+    "artifactPath": "/var/folders/pl/qb1jh4w97m3g7r8qlwn8z4mr0000gn/T/runeflow-eval-ztxpjl/run_20260405112654_7djrcs.json"
+  }
+}

@@ -24,10 +24,10 @@ function buildMessages({ prompt, input, docs, context }) {
     JSON.stringify(input, null, 2),
   ].join("\n");
 
-  return [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt },
-  ];
+  return {
+    systemPrompt,
+    userPrompt,
+  };
 }
 
 async function dispatchLlm({ llm, systemPrompt, userPrompt }) {

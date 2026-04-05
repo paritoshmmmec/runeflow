@@ -1,0 +1,25 @@
+{
+  "team_name": "Runeflow Platform",
+  "period_label": "Mar 29 - Apr 4",
+  "sources": {
+    "slack": [
+      "Shipped the first in-repo tool registry slice for GitHub and Linear, including schemas for open PR counts, stale PRs, backlog counts, and issue lists.",
+      "Implemented registry-backed tool contracts so tool steps can omit inline output schemas when a registry entry exists.",
+      "Built the first raw-vs-Runeflow evaluation harness and started comparing token usage and reliability."
+    ],
+    "gdrive": [
+      "Drafted the hybrid-skills roadmap covering host ownership, runtime semantics, hooks, and tool registry priorities.",
+      "Outlined an evaluation plan for raw skills versus Runeflow across GitHub, Linear, and mixed workflows.",
+      "Documented the architecture boundary: host owns lifecycle, Runeflow owns workflow, LLM handles bounded generation."
+    ],
+    "email": [
+      "Identified Cerebras token-per-minute quota limits as a practical issue for benchmark fairness when running raw and Runeflow back to back.",
+      "Discussed using smaller models or delayed sequential runs for fairer hosted-model comparisons.",
+      "Collected feedback that tool contracts should come from a registry instead of being repeated in every workflow file."
+    ],
+    "calendar": [
+      "Reviewed the prototype direction for hybrid text-plus-execution skills and agreed to prioritize tool registry work ahead of deeper composition features.",
+      "Aligned on adding lifecycle hooks so hosts can intervene around steps without taking over workflow orchestration."
+    ]
+  }
+}

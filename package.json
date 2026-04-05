@@ -8,9 +8,12 @@
   },
   "scripts": {
     "test": "node --test",
-    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md"
+    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md",
+    "eval:open-pr": "node --env-file=.env ./eval/open-pr.js --base-branch main",
+    "eval:3p": "node --env-file=.env ./eval/3p-updates.js"
   },
   "dependencies": {
+    "tiktoken": "^1.0.22",
     "yaml": "^2.8.1"
   }
 }
