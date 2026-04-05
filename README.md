@@ -39,6 +39,16 @@ Runeflow skill:
 
 The important difference is not whether the LLM can see the text. It can. The difference is that the text is no longer the execution contract.
 
+## Performance Benchmarks
+
+Our evaluation harness (comparing Runeflow against raw Zero-Shot AI commands) reveals astronomical efficiency gains for orchestration-heavy tasks (e.g. MCP integration, tool discovery):
+
+- **Token Compression (-84%)**: Because Runeflow executes tool tracking and auth checks natively in Javascript, it entirely strips dense orchestration instructions from the LLM prompt. In the `adyntel-automation` benchmark, Runeflow compressed an 810-token input down to just 128 tokens.
+- **Latency Acceleration (3x Faster)**: Removing the prompt bloat allows models like `gpt-4o` to reduce time-to-first-token and complete executions up to 3x faster (e.g. dropping from 1.8s down to 596ms). 
+- **Bypassing the "Zero-Shot Trap"**: Raw prompts frequently fall into infinite "tool discovery" loops or explicitly refuse to execute operations without querying tool schemas first. Runeflow's deterministic runtime completely eliminates this failure mode.
+
+*See the full [Benchmark Report](./benchmark_report.md) for data breakdowns across multiple providers (OpenAI, Cerebras).*
+
 ## Architecture
 
 Runeflow is meant to be run by a host application, which may be a CLI, backend, or agentic codebase.
