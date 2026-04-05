@@ -4,7 +4,7 @@ This report compiles the performance and token efficiency metrics for the `3p-up
 
 ## Executive Summary
 
-Runeflow consistently demonstrates significant **token efficiency gains** over the raw skill baselines. In complex tasks like `3p-updates`, Runeflow reduced input tokens by **~35-38%**, while in simple tasks like `open-pr`, the overhead was minimal.
+Runeflow consistently demonstrates significant **token efficiency gains** over the raw skill baselines. In complex orchestration tasks like `adyntel-automation` and `addresszen-automation`, Runeflow reduced input tokens by **~82%**. In synthesis tasks like `3p-updates`, the reduction is **~38%**. In simple tasks like `open-pr`, overhead is minimal and performance is neutral.
 
 ---
 
@@ -67,6 +67,27 @@ Runeflow consistently demonstrates significant **token efficiency gains** over t
 - **Context Scope (Orchestration Hiding)**: The Raw baseline forces the LLM to read the *entire* MCP integration markdown doc, teaching it how to authenticate and fetch tools dynamically. Runeflow hides all of that logic inside the Javascript execution layer, passing *only* the atomic user query to the LLM. 
 - **Astronomical Speedup**: Because Runeflow strips out the massive MCP schema instructions entirely, the OpenAI latency dropped from 1.8 seconds down to a blistering 596ms (**3x faster**).
 - **The Zero-Shot Failure Trap**: The Cerebras (Raw) model actually failed internally. Since the Raw skills instructions say "always call RUBE_SEARCH_TOOLS first", the LLM returned a JSON warning saying it refused to execute until it searched tools. Runeflow forces deterministic execution, entirely bypassing the multi-turn failure trap that raw agents fall into.
+
+---
+
+## 4. Task: `addresszen-automation`
+*Orchestration-heavy task mimicking MCP dynamic tool execution for Addresszen (Composio).*
+
+### Performance & Usage Table
+
+| Metric | Cerebras (Raw) | Cerebras (Runeflow) | OpenAI (Raw) | OpenAI (Runeflow) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Model** | `qwen-3-235b...` | `qwen-3-235b...` | `gpt-4o` | `gpt-4o` |
+| **Status** | ✅ Success | ✅ Success | ✅ Success | ✅ Success |
+| **Latency (Total)** | 589ms | 669ms | 2,566ms | 1,711ms |
+| **Input Tokens** | 817 | 150 (**-82%**) | 816 | 149 (**-82%**) |
+| **Output Tokens** | 18 | 19 | 48 | 20 |
+| **Total Tokens** | 835 | **169** | 864 | **169** |
+
+### Key Observations
+- **Consistent -82% input token reduction**: Mirrors the adyntel result exactly. The raw skill sends the full MCP orchestration doc — tool discovery instructions, pitfalls, quick reference table — to the LLM. Runeflow handles connection verification in the runtime and passes only the resolved task prompt.
+- **No zero-shot failure this time**: Unlike adyntel where Cerebras raw fell into a tool discovery loop, both raw runs succeeded here. The token reduction is identical regardless — the structural advantage holds even when the raw skill doesn't fail.
+- **OpenAI latency improvement**: Runeflow dropped OpenAI latency from 2,566ms to 1,711ms (1.5x faster) by stripping orchestration context from the prompt.
 
 ---
 

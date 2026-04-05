@@ -214,3 +214,130 @@ output {
   assert.equal(validation.valid, false);
   assert.match(validation.issues.join("\n"), /must declare an out schema or reference a registered tool with an outputSchema/);
 });
+
+test("validateRuneflow accepts llm step with valid docs reference", () => {
+  const parsed = parseRuneflow(`---
+name: docs-valid
+description: Valid docs reference
+version: 0.1
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock
+  router: false
+  model: base
+---
+
+:::guidance[pr-tone]
+Keep titles short.
+:::
+
+\`\`\`runeflow
+step draft type=llm {
+  docs: pr-tone
+  prompt: "Draft a PR title."
+  schema: { title: string }
+}
+
+output {
+  title: steps.draft.title
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, true);
+});
+
+test("validateRuneflow rejects llm step with unknown docs reference", () => {
+  const parsed = parseRuneflow(`---
+name: docs-invalid
+description: Invalid docs reference
+version: 0.1
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  docs: nonexistent-block
+  prompt: "Draft a PR title."
+  schema: { title: string }
+}
+
+output {
+  title: steps.draft.title
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /unknown block 'nonexistent-block'/);
+});
+
+test("validateRuneflow accepts a valid transform step", () => {
+  const parsed = parseRuneflow(`---
+name: transform-valid
+description: Valid transform
+version: 0.1
+inputs: {}
+outputs:
+  count: number
+---
+
+\`\`\`runeflow
+step fetch type=tool {
+  tool: util.complete
+  with: { items: ["a", "b"] }
+  out: { items: [string] }
+}
+
+step count type=transform {
+  input: steps.fetch.items
+  expr: "input.length"
+  out: { count: number }
+}
+
+output {
+  count: steps.count.count
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, true);
+});
+
+test("validateRuneflow rejects transform step missing expr or out", () => {
+  const parsed = parseRuneflow(`---
+name: transform-invalid
+description: Invalid transform
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+step reshape type=transform {
+  input: "hello"
+}
+
+output {
+  value: steps.reshape.value
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, false);
+  assert.match(validation.issues.join("\n"), /must declare an expr/);
+  assert.match(validation.issues.join("\n"), /must declare an out schema/);
+});

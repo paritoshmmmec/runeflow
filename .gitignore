@@ -2,3 +2,4 @@ node_modules/
 .skill-runs/
 .runeflow-runs/
 .env
+.vscode/settings.json

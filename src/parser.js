@@ -259,9 +259,19 @@ function parseWorkflow(workflowSource) {
   return { steps, output };
 }
 
+function extractDocBlocks(markdownBody) {
+  const docBlocks = {};
+  const cleaned = markdownBody.replace(/^:::guidance\[([^\]]+)\]\n([\s\S]*?)^:::\n?/gm, (_, name, content) => {
+    docBlocks[name.trim()] = content.trim();
+    return "";
+  });
+  return { docBlocks, cleanedBody: cleaned };
+}
+
 export function parseSkill(source, options = {}) {
   const { frontmatter, remainder } = extractFrontmatter(source);
-  const { docs, workflowSource } = extractRuneflowBlock(remainder);
+  const { docs: rawDocs, workflowSource } = extractRuneflowBlock(remainder);
+  const { docBlocks, cleanedBody } = extractDocBlocks(rawDocs);
   const workflow = parseWorkflow(workflowSource);
 
   return {
@@ -274,7 +284,8 @@ export function parseSkill(source, options = {}) {
       outputs: frontmatter.outputs ?? {},
       llm: frontmatter.llm ?? null,
     },
-    docs,
+    docs: cleanedBody,
+    docBlocks,
     workflow,
     raw: source,
   };

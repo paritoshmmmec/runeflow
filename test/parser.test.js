@@ -97,3 +97,68 @@ output {
   assert.equal(parsed.workflow.steps.length, 1);
   assert.equal(parsed.workflow.steps[0].id, "first");
 });
+
+test("parseRuneflow extracts named guidance blocks and removes them from docs", () => {
+  const parsed = parseRuneflow(`---
+name: doc-blocks
+description: Named doc blocks
+---
+
+# Overview
+
+General context here.
+
+:::guidance[pr-tone]
+Keep PR titles under 72 chars. Use imperative mood.
+:::
+
+:::guidance[diff-context]
+Focus on behavioral changes, not style fixes.
+:::
+
+Some trailing prose.
+
+\`\`\`runeflow
+step work type=tool {
+  tool: util.complete
+  with: { ok: true }
+  out: { ok: boolean }
+}
+
+output {
+}
+\`\`\`
+`);
+
+  assert.deepEqual(Object.keys(parsed.docBlocks), ["pr-tone", "diff-context"]);
+  assert.match(parsed.docBlocks["pr-tone"], /imperative mood/);
+  assert.match(parsed.docBlocks["diff-context"], /behavioral changes/);
+  assert.doesNotMatch(parsed.docs, /imperative mood/);
+  assert.doesNotMatch(parsed.docs, /behavioral changes/);
+  assert.match(parsed.docs, /General context here/);
+  assert.match(parsed.docs, /trailing prose/);
+});
+
+test("parseRuneflow returns empty docBlocks when no guidance blocks are present", () => {
+  const parsed = parseRuneflow(`---
+name: no-blocks
+description: No blocks
+---
+
+Just docs.
+
+\`\`\`runeflow
+step work type=tool {
+  tool: util.complete
+  with: { ok: true }
+  out: { ok: boolean }
+}
+
+output {
+}
+\`\`\`
+`);
+
+  assert.deepEqual(parsed.docBlocks, {});
+  assert.match(parsed.docs, /Just docs/);
+});

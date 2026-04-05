@@ -72,9 +72,12 @@ async function invokeTool(step, resolvedInput, runtime, state) {
   });
 }
 
-function projectLlmContext(definition) {
+function projectLlmContext(definition, step) {
+  const docs = step.docs
+    ? (definition.docBlocks?.[step.docs] ?? definition.docs)
+    : definition.docs;
   return {
-    docs: definition.docs,
+    docs,
     metadata: deepClone(definition.metadata),
     source_path: definition.sourcePath ?? null,
   };
@@ -108,6 +111,8 @@ async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtim
     throw new RuntimeError(`No LLM handler registered for provider '${provider}'.`);
   }
 
+  const context = projectLlmContext(definition, step);
+
   return handler({
     step,
     llm: deepClone(llmConfig),
@@ -115,8 +120,8 @@ async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtim
     input: resolvedInput,
     schema: step.schema,
     state,
-    docs: definition.docs,
-    context: projectLlmContext(definition),
+    docs: context.docs,
+    context,
   });
 }
 
@@ -124,6 +129,18 @@ function failRun(run, message, error = null) {
   run.status = "failed";
   run.error = error ? serializeError(error) : { name: "RuntimeError", message, stack: null };
   run.finished_at = new Date().toISOString();
+}
+
+async function callHook(hookFn, payload, hookEvents) {
+  if (typeof hookFn !== "function") return undefined;
+  const event = { hook: hookFn.name || "hook", payload, result: null, error: null };
+  try {
+    event.result = await hookFn(payload) ?? null;
+  } catch (error) {
+    event.error = serializeError(error);
+  }
+  hookEvents.push(event);
+  return event.result;
 }
 
 function inferBranchOutput(conditionResult, target) {
@@ -172,6 +189,20 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     let finalOutputs = null;
     let resolvedInput = {};
     let resolvedPrompt = null;
+    const hookEvents = [];
+
+    const beforeResult = await callHook(effectiveRuntime.hooks?.beforeStep, {
+      runId: run.run_id,
+      step,
+      state,
+    }, hookEvents);
+
+    if (beforeResult?.abort) {
+      failRun(run, beforeResult.reason ?? `beforeStep aborted step '${step.id}'.`);
+      run.outputs = {};
+      run.artifact_path = await writeRunArtifact(run, runsDir);
+      return run;
+    }
 
     while (attempts <= (step.retry ?? 0)) {
       attempts += 1;
@@ -193,10 +224,23 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           if (issues.length) {
             throw new RuntimeError(`LLM output failed validation: ${issues.join("; ")}`);
           }
+          resolvedPrompt = resolvedPrompt; // captured for artifact
         } else if (step.kind === "branch") {
           const matched = evaluateExpression(step.if, state);
           const target = matched ? step.then : step.else;
           finalOutputs = inferBranchOutput(matched, target);
+        } else if (step.kind === "transform") {
+          const resolvedTransformInput = resolveBindings(step.input, state);
+          try {
+            // eslint-disable-next-line no-new-func
+            finalOutputs = new Function("input", `return (${step.expr})`)(resolvedTransformInput);
+          } catch (error) {
+            throw new RuntimeError(`transform '${step.id}' expression failed: ${error.message}`);
+          }
+          const issues = validateShape(finalOutputs, step.out, `steps.${step.id}`);
+          if (issues.length) {
+            throw new RuntimeError(`Transform output failed validation: ${issues.join("; ")}`);
+          }
         } else {
           throw new RuntimeError(`Unsupported step kind '${step.kind}'.`);
         }
@@ -208,6 +252,16 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       }
     }
 
+    if (lastError) {
+      await callHook(effectiveRuntime.hooks?.onStepError, {
+        runId: run.run_id,
+        step,
+        error: serializeError(lastError),
+        attempts,
+        state,
+      }, hookEvents);
+    }
+
     const stepRun = {
       id: step.id,
       kind: step.kind,
@@ -216,14 +270,26 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       inputs: deepClone(resolvedInput),
       outputs: lastError ? null : deepClone(finalOutputs),
       error: lastError ? serializeError(lastError) : null,
+      projected_docs: step.kind === "llm" ? (step.docs
+        ? (definition.docBlocks?.[step.docs] ?? definition.docs)
+        : definition.docs) : undefined,
+      hook_events: hookEvents,
       started_at: new Date().toISOString(),
       finished_at: new Date().toISOString(),
     };
 
+    run.steps.push(stepRun);
+
+    await callHook(effectiveRuntime.hooks?.afterStep, {
+      runId: run.run_id,
+      step,
+      stepRun: deepClone(stepRun),
+      state,
+    }, hookEvents);
+
+    if (!stepRun.hook_events.length) stepRun.hook_events = undefined;
     stepRun.artifact_path = await writeStepArtifact(run.run_id, stepRun, runsDir);
     stepRun.result_path = stepRun.artifact_path;
-
-    run.steps.push(stepRun);
 
     if (lastError) {
       const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;

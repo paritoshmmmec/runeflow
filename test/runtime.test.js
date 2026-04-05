@@ -522,3 +522,380 @@ output {
   assert.match(run.error.message, /Tool output failed validation/);
   assert.match(run.error.message, /expected number/);
 });
+
+test("hooks: beforeStep receives step and state, afterStep receives stepRun outputs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: hooks-observe
+description: Hook observation
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+step work type=tool {
+  tool: mock.work
+  out: { value: string }
+}
+
+output {
+  value: steps.work.value
+}
+\`\`\`
+`);
+
+  const beforeCalls = [];
+  const afterCalls = [];
+
+  const run = await runRuneflow(parsed, {}, {
+    tools: { "mock.work": async () => ({ value: "done" }) },
+    hooks: {
+      beforeStep: async ({ step, state }) => { beforeCalls.push({ id: step.id, inputs: state.inputs }); },
+      afterStep: async ({ stepRun }) => { afterCalls.push({ id: stepRun.id, outputs: stepRun.outputs }); },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.deepEqual(beforeCalls, [{ id: "work", inputs: {} }]);
+  assert.deepEqual(afterCalls, [{ id: "work", outputs: { value: "done" } }]);
+});
+
+test("hooks: beforeStep abort stops the run with the abort reason", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: hooks-abort
+description: Hook abort
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+step work type=tool {
+  tool: mock.work
+  out: { value: string }
+}
+
+output {
+  value: steps.work.value
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {
+    tools: { "mock.work": async () => ({ value: "done" }) },
+    hooks: {
+      beforeStep: async () => ({ abort: true, reason: "policy denied" }),
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "failed");
+  assert.match(run.error.message, /policy denied/);
+  assert.equal(run.steps.length, 0);
+});
+
+test("hooks: onStepError fires after retries are exhausted", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: hooks-error
+description: Hook error
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+llm:
+  provider: mock-default
+  router: false
+  model: baseline
+---
+
+\`\`\`runeflow
+step draft type=llm retry=1 {
+  prompt: "write"
+  schema: { value: string }
+}
+
+output {
+  value: steps.draft.value
+}
+\`\`\`
+`);
+
+  const errorCalls = [];
+
+  const run = await runRuneflow(parsed, {}, {
+    llms: { "mock-default": async () => ({ value: 42 }) },
+    hooks: {
+      onStepError: async ({ step, attempts }) => { errorCalls.push({ id: step.id, attempts }); },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "failed");
+  assert.deepEqual(errorCalls, [{ id: "draft", attempts: 2 }]);
+});
+
+test("hooks: hook errors are non-fatal and recorded in step artifact", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: hooks-safe
+description: Hook error safety
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+step work type=tool {
+  tool: mock.work
+  out: { value: string }
+}
+
+output {
+  value: steps.work.value
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {
+    tools: { "mock.work": async () => ({ value: "ok" }) },
+    hooks: {
+      afterStep: async () => { throw new Error("telemetry failed"); },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.value, "ok");
+  assert.ok(run.steps[0].hook_events?.some((e) => e.error?.message === "telemetry failed"));
+});
+
+test("doc blocks: llm step with docs receives named block, not full docs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: doc-projection
+description: Doc block projection
+version: 0.1
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+# General guidance
+
+This is the full docs section.
+
+:::guidance[pr-tone]
+Keep PR titles under 72 chars. Use imperative mood.
+:::
+
+\`\`\`runeflow
+step draft type=llm {
+  docs: pr-tone
+  prompt: "Draft a PR title."
+  schema: { title: string }
+}
+
+output {
+  title: steps.draft.title
+}
+\`\`\`
+`);
+
+  let receivedDocs = null;
+
+  const run = await runRuneflow(parsed, {}, {
+    llms: {
+      "mock-default": async ({ docs }) => {
+        receivedDocs = docs;
+        return { title: "Add runtime doc projection" };
+      },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.match(receivedDocs, /imperative mood/);
+  assert.doesNotMatch(receivedDocs, /full docs section/);
+  assert.match(run.steps[0].projected_docs, /imperative mood/);
+});
+
+test("doc blocks: llm step without docs receives full docs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: doc-fallback
+description: Doc fallback
+version: 0.1
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+# Full guidance
+
+This is the full docs section.
+
+:::guidance[pr-tone]
+Keep PR titles short.
+:::
+
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "Draft a PR title."
+  schema: { title: string }
+}
+
+output {
+  title: steps.draft.title
+}
+\`\`\`
+`);
+
+  let receivedDocs = null;
+
+  const run = await runRuneflow(parsed, {}, {
+    llms: {
+      "mock-default": async ({ docs }) => {
+        receivedDocs = docs;
+        return { title: "Add runtime doc projection" };
+      },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.match(receivedDocs, /Full guidance/);
+  assert.doesNotMatch(receivedDocs, /Keep PR titles short/);
+});
+
+test("transform: filters and maps tool output for downstream llm step", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: transform-filter
+description: Transform step filters data
+version: 0.1
+inputs: {}
+outputs:
+  summary: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+step fetch type=tool {
+  tool: mock.fetch
+  out: { items: [{ id: number, state: string }] }
+}
+
+step filter type=transform {
+  input: steps.fetch.items
+  expr: "input.filter(x => x.state === 'open').map(x => x.id)"
+  out: [number]
+}
+
+step draft type=llm {
+  prompt: "Summarize open items."
+  input: { ids: steps.filter }
+  schema: { summary: string }
+}
+
+output {
+  summary: steps.draft.summary
+}
+\`\`\`
+`);
+
+  let receivedInput = null;
+
+  const run = await runRuneflow(parsed, {}, {
+    tools: {
+      "mock.fetch": async () => ({
+        items: [
+          { id: 1, state: "open" },
+          { id: 2, state: "closed" },
+          { id: 3, state: "open" },
+        ],
+      }),
+    },
+    llms: {
+      "mock-default": async ({ input }) => {
+        receivedInput = input;
+        return { summary: "2 open items" };
+      },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.deepEqual(receivedInput.ids, [1, 3]);
+  assert.equal(run.outputs.summary, "2 open items");
+});
+
+test("transform: output is validated against out schema", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: transform-bad-out
+description: Transform output validation
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+step reshape type=transform {
+  input: "hello"
+  expr: "42"
+  out: { value: string }
+}
+
+output {
+  value: steps.reshape.value
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir });
+
+  assert.equal(run.status, "failed");
+  assert.match(run.error.message, /Transform output failed validation/);
+});
+
+test("transform: malformed expression produces clean RuntimeError", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: transform-bad-expr
+description: Transform bad expression
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+step reshape type=transform {
+  input: "hello"
+  expr: "input.notAFunction((("
+  out: { value: string }
+}
+
+output {
+  value: steps.reshape.value
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir });
+
+  assert.equal(run.status, "failed");
+  assert.match(run.error.message, /transform 'reshape' expression failed/);
+});

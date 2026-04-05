@@ -78,6 +78,10 @@ function getStepOutputSchema(step, toolRegistry) {
     };
   }
 
+  if (step.kind === "transform") {
+    return step.out ?? null;
+  }
+
   return null;
 }
 
@@ -182,7 +186,7 @@ export function validateSkill(definition, options = {}) {
 
     seenStepIds.add(step.id);
 
-    if (step.kind !== "tool" && step.kind !== "llm" && step.kind !== "branch") {
+    if (step.kind !== "tool" && step.kind !== "llm" && step.kind !== "branch" && step.kind !== "transform") {
       issues.push(`step '${step.id}' has unsupported kind '${step.kind}'`);
       continue;
     }
@@ -210,11 +214,29 @@ export function validateSkill(definition, options = {}) {
         issues.push(`step '${step.id}' must declare a schema`);
       }
 
+      if (step.docs !== undefined && step.docs !== null) {
+        const docBlocks = definition.docBlocks ?? {};
+        if (typeof step.docs !== "string" || !step.docs.trim()) {
+          issues.push(`step '${step.id}' docs must be a non-empty string`);
+        } else if (!Object.prototype.hasOwnProperty.call(docBlocks, step.docs)) {
+          issues.push(`step '${step.id}' docs references unknown block '${step.docs}'`);
+        }
+      }
+
       if (step.llm !== undefined && step.llm !== null) {
         validateLlmConfig(step.llm, `step '${step.id}' llm`, issues);
       }
     } else if (step.llm !== undefined && step.llm !== null) {
       issues.push(`step '${step.id}' may only declare llm config when kind is 'llm'`);
+    }
+
+    if (step.kind === "transform") {
+      if (typeof step.expr !== "string" || !step.expr.trim()) {
+        issues.push(`step '${step.id}' must declare an expr`);
+      }
+      if (!isPlainObject(step.out) && !Array.isArray(step.out)) {
+        issues.push(`step '${step.id}' must declare an out schema`);
+      }
     }
 
     if (step.kind === "branch") {
