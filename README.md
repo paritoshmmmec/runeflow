@@ -46,36 +46,38 @@ Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 
 ## 🚀 Quickstart
 
-Requires Node >= 20.
+> Requires Node >= 20.
 
-### 1. Install
-
-```bash
-npm install runeflow
-```
-
-Or globally if you want the `runeflow` CLI on your PATH:
+**Step 1 — Install**
 
 ```bash
 npm install -g runeflow
 ```
 
-### 2. Get an API key
+**Step 2 — Add your API key**
 
-The built-in examples use [Cerebras](https://cloud.cerebras.ai) (free tier works). Add your key to a `.env` file in your project:
+Runeflow works with Cerebras, OpenAI, or Anthropic. Pick one and add the key to a `.env` file:
 
 ```bash
+# Cerebras (free tier at cloud.cerebras.ai)
 echo "CEREBRAS_API_KEY=your-key-here" > .env
+
+# or OpenAI
+echo "OPENAI_API_KEY=your-key-here" > .env
+
+# or Anthropic
+echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
 
-### 3. Write a skill file
+**Step 3 — Create a skill file**
 
-Create `draft-pr.runeflow.md` in your git repo:
+A skill is one Markdown file. The frontmatter declares inputs/outputs, the prose is guidance for the LLM, and the `runeflow` block is the executable workflow.
+
+Create `draft-pr.runeflow.md` inside any git repo:
 
 ````md
 ---
 name: draft-pr
-description: Draft a PR title and body for the current branch.
 version: 0.1
 inputs:
   base_branch: string
@@ -84,13 +86,12 @@ outputs:
   body: string
 llm:
   provider: cerebras
-  router: false
   model: qwen-3-235b-a22b-instruct-2507
 ---
 
 # Draft PR
 
-Draft a concise pull request title and body based on the diff.
+Write a concise PR title and a short body describing what changed and why.
 
 ```runeflow
 step branch type=tool {
@@ -106,8 +107,9 @@ step diff type=tool {
 
 step draft type=llm {
   prompt: |
-    Draft a PR for {{ steps.branch.branch }} targeting {{ inputs.base_branch }}.
-    Diff summary: {{ steps.diff.summary }}
+    Draft a PR for {{ steps.branch.branch }} → {{ inputs.base_branch }}.
+    Changed files: {{ steps.diff.files }}
+    Diff: {{ steps.diff.summary }}
   input: { diff_summary: steps.diff.summary }
   schema: { title: string, body: string }
 }
@@ -119,65 +121,53 @@ output {
 ```
 ````
 
-### 4. Write a runtime
+**Step 4 — Run it**
 
-Create `runtime.js` — this is where you wire in your LLM provider. Or skip this entirely and use the **built-in default runtime** which handles Cerebras, OpenAI, and Anthropic automatically:
+The default runtime handles Cerebras, OpenAI, and Anthropic automatically — no extra config needed.
 
-```js
-// runtime.js — use the default runtime
-import { createDefaultRuntime } from "runeflow";
-export default createDefaultRuntime();
-```
-
-That's it. It reads `CEREBRAS_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` from your environment based on the `provider` declared in your skill file.
-
-If you need custom behavior (logging, retries, a different provider), you can extend it:
-
-```js
-import { createDefaultRuntime } from "runeflow";
-
-const base = createDefaultRuntime();
-
-export default {
-  ...base,
-  llms: {
-    ...base.llms,
-    // override or add providers
-    ollama: async ({ llm, prompt, input, docs, schema }) => {
-      // your custom handler
-    },
-  },
-};
-```
-
-### 5. Validate and run
+Export your key and run:
 
 ```bash
-# Check the skill file for errors — no API calls, no git needed
-npx runeflow validate ./draft-pr.runeflow.md
+export CEREBRAS_API_KEY=your-key-here
 
-# Run it from inside your git repo
-node --env-file=.env ./node_modules/.bin/runeflow run ./draft-pr.runeflow.md \
+runeflow run ./draft-pr.runeflow.md \
   --input '{"base_branch":"main"}' \
-  --runtime ./runtime.js
+  --runtime node_modules/runeflow/src/default-runtime.js
 ```
 
-You'll get back:
+Or load it from a `.env` file using Node's `--env-file` flag:
+
+```bash
+node --env-file=.env node_modules/.bin/runeflow run ./draft-pr.runeflow.md \
+  --input '{"base_branch":"main"}' \
+  --runtime node_modules/runeflow/src/default-runtime.js
+```
+
+Output:
 
 ```json
 {
-  "title": "feat: add input validation to checkout flow",
-  "body": "Adds null checks and error boundaries to the checkout step..."
+  "title": "feat: add retry logic to checkout step",
+  "body": "Wraps the checkout tool call in a retry loop with exponential backoff..."
 }
 ```
 
-A full run artifact with per-step inputs, outputs, and timing is written to `.runeflow-runs/`.
+Every step also writes a JSON artifact to `.runeflow-runs/` — inputs, outputs, timing, and errors, all inspectable after the fact.
 
-### 6. Explore what's available
+**Step 5 — Validate before you run**
+
+Validation is static — no API calls, no git. Catches broken references and schema mismatches before execution:
 
 ```bash
-npx runeflow tools list
-npx runeflow tools inspect git.diff_summary
+runeflow validate ./draft-pr.runeflow.md
+# { "valid": true, "issues": [] }
+```
+
+**Step 6 — Discover available tools**
+
+```bash
+runeflow tools list
+runeflow tools inspect git.diff_summary
 ```
 
 ---
