@@ -149,3 +149,123 @@ output {
     process.chdir(originalCwd);
   }
 });
+
+test("runCli resume: retries from halted step, replaying prior successful steps from cache", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-resume-"));
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: resume-demo
+description: Resume demo
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step first type=tool {
+  tool: mock.first
+  out: { value: string }
+}
+
+step second type=tool {
+  tool: mock.second
+  with: { value: steps.first.value }
+  out: { result: string }
+}
+
+output {
+  result: steps.second.result
+}
+\`\`\`
+`,
+  );
+
+  // Runtime that fails on first attempt of second step, succeeds on second
+  let secondCallCount = 0;
+  await fs.writeFile(
+    path.join(tempDir, "runtime.js"),
+    `export const tools = {
+  "mock.first": async () => ({ value: "step-one-done" }),
+  "mock.second": async ({ value }) => {
+    // Always succeed in this runtime (simulates fixed service)
+    return { result: "resumed:" + value };
+  },
+};
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    // Manually create a halted run artifact to simulate a prior failed run
+    const runsDir = path.join(tempDir, ".runeflow-runs");
+    await fs.mkdir(runsDir, { recursive: true });
+    const stepsDir = path.join(runsDir, "run_20260101000000_aaaaaa", "steps");
+    await fs.mkdir(stepsDir, { recursive: true });
+
+    const firstStepArtifact = {
+      id: "first",
+      kind: "tool",
+      status: "success",
+      attempts: 1,
+      inputs: {},
+      outputs: { value: "step-one-done" },
+      error: null,
+      input_hash: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    };
+    const firstStepPath = path.join(stepsDir, "first.json");
+    await fs.writeFile(firstStepPath, JSON.stringify(firstStepArtifact));
+    firstStepArtifact.artifact_path = firstStepPath;
+
+    const secondStepArtifact = {
+      id: "second",
+      kind: "tool",
+      status: "failed",
+      attempts: 1,
+      inputs: { value: "step-one-done" },
+      outputs: null,
+      error: { name: "Error", message: "network timeout", stack: null },
+    };
+    const secondStepPath = path.join(stepsDir, "second.json");
+    await fs.writeFile(secondStepPath, JSON.stringify(secondStepArtifact));
+    secondStepArtifact.artifact_path = secondStepPath;
+
+    const haltedRun = {
+      run_id: "run_20260101000000_aaaaaa",
+      runeflow: { name: "resume-demo", version: "0.1" },
+      status: "halted_on_error",
+      halted_step_id: "second",
+      inputs: {},
+      steps: [firstStepArtifact, secondStepArtifact],
+      outputs: {},
+      error: { name: "Error", message: "network timeout", stack: null },
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+    };
+    await fs.writeFile(
+      path.join(runsDir, "run_20260101000000_aaaaaa.json"),
+      JSON.stringify(haltedRun),
+    );
+
+    const output = await captureStdout(() =>
+      runCli(["resume", "./workflow.runeflow.md", "--runtime", "./runtime.js"]),
+    );
+    const run = JSON.parse(output);
+
+    assert.equal(run.status, "success");
+    assert.equal(run.steps.length, 2);
+    // first step was replayed from cache (input_hash matched)
+    assert.equal(run.steps[0].id, "first");
+    assert.equal(run.steps[0].cached, true);
+    // second step was re-executed
+    assert.equal(run.steps[1].id, "second");
+    assert.equal(run.steps[1].cached, undefined);
+    assert.equal(run.outputs.result, "resumed:step-one-done");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});

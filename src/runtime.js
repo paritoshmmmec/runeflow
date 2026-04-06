@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveWorkflowBlocks } from "./blocks.js";
@@ -132,6 +133,18 @@ function failRun(run, message, error = null) {
   run.finished_at = new Date().toISOString();
 }
 
+function haltRun(run, stepId, message, error = null) {
+  run.status = "halted_on_error";
+  run.halted_step_id = stepId;
+  run.error = error ? serializeError(error) : { name: "RuntimeError", message, stack: null };
+  run.finished_at = new Date().toISOString();
+}
+
+function hashStepInputs(resolvedInput) {
+  const stable = JSON.stringify(resolvedInput, Object.keys(resolvedInput ?? {}).sort());
+  return crypto.createHash("sha256").update(stable).digest("hex");
+}
+
 async function callHook(hookFn, payload, hookEvents) {
   if (typeof hookFn !== "function") return undefined;
   const event = { hook: hookFn.name || "hook", payload, result: null, error: null };
@@ -187,7 +200,31 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     const state = {
       inputs,
       stepMap: buildStepState(run.steps),
+      consts: resolvedDefinition.consts ?? {},
     };
+
+    // skip_if — evaluate before hooks, skip cleanly with null outputs
+    if (step.skip_if) {
+      const shouldSkip = evaluateExpression(step.skip_if, state);
+      if (shouldSkip) {
+        const skippedRun = {
+          id: step.id,
+          kind: step.kind,
+          status: "skipped",
+          attempts: 0,
+          inputs: {},
+          outputs: null,
+          error: null,
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        };
+        skippedRun.artifact_path = await writeStepArtifact(run.run_id, skippedRun, runsDir);
+        skippedRun.result_path = skippedRun.artifact_path;
+        run.steps.push(skippedRun);
+        index += 1;
+        continue;
+      }
+    }
 
     let attempts = 0;
     let lastError = null;
@@ -195,6 +232,58 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     let resolvedInput = {};
     let resolvedPrompt = null;
     const hookEvents = [];
+
+    // Input-hash caching / resume: replay prior successful or skipped steps
+    if (step.cache !== false && options.priorSteps) {
+      const priorStep = options.priorSteps[step.id];
+
+      // Replay a previously skipped step as-is
+      if (priorStep?.status === "skipped") {
+        const cachedRun = {
+          id: step.id,
+          kind: step.kind,
+          status: "skipped",
+          attempts: 0,
+          inputs: {},
+          outputs: null,
+          error: null,
+          cached: true,
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        };
+        cachedRun.artifact_path = await writeStepArtifact(run.run_id, cachedRun, runsDir);
+        cachedRun.result_path = cachedRun.artifact_path;
+        run.steps.push(cachedRun);
+        index += 1;
+        continue;
+      }
+
+      // Replay a prior successful step if input hash matches
+      if (priorStep?.status === "success" && priorStep.input_hash) {
+        const preResolvedInput = resolveBindings(step.with ?? step.input ?? {}, state);
+        const currentHash = hashStepInputs(preResolvedInput);
+        if (currentHash === priorStep.input_hash) {
+          const cachedRun = {
+            id: step.id,
+            kind: step.kind,
+            status: "success",
+            attempts: 0,
+            inputs: deepClone(preResolvedInput),
+            outputs: deepClone(priorStep.outputs),
+            error: null,
+            input_hash: currentHash,
+            cached: true,
+            started_at: new Date().toISOString(),
+            finished_at: new Date().toISOString(),
+          };
+          cachedRun.artifact_path = await writeStepArtifact(run.run_id, cachedRun, runsDir);
+          cachedRun.result_path = cachedRun.artifact_path;
+          run.steps.push(cachedRun);
+          index += 1;
+          continue;
+        }
+      }
+    }
 
     const beforeResult = await callHook(effectiveRuntime.hooks?.beforeStep, {
       runId: run.run_id,
@@ -278,6 +367,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       inputs: deepClone(resolvedInput),
       outputs: lastError ? null : deepClone(finalOutputs),
       error: lastError ? serializeError(lastError) : null,
+      input_hash: step.cache !== false ? hashStepInputs(resolvedInput) : undefined,
       projected_docs: step.kind === "llm" ? (step.docs
         ? (resolvedDefinition.docBlocks?.[step.docs] ?? resolvedDefinition.docs)
         : resolvedDefinition.docs) : undefined,
@@ -302,7 +392,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     if (lastError) {
       const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
       if (!step.fallback || step.fallback === "fail") {
-        failRun(run, resolvedFailMessage ?? lastError.message, lastError);
+        haltRun(run, step.id, resolvedFailMessage ?? lastError.message, lastError);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
         return run;

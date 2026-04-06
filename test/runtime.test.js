@@ -518,7 +518,7 @@ output {
     { runsDir },
   );
 
-  assert.equal(run.status, "failed");
+  assert.equal(run.status, "halted_on_error");
   assert.match(run.error.message, /Tool output failed validation/);
   assert.match(run.error.message, /expected number/);
 });
@@ -633,7 +633,7 @@ output {
     },
   }, { runsDir });
 
-  assert.equal(run.status, "failed");
+  assert.equal(run.status, "halted_on_error");
   assert.deepEqual(errorCalls, [{ id: "draft", attempts: 2 }]);
 });
 
@@ -866,7 +866,7 @@ output {
 
   const run = await runRuneflow(parsed, {}, {}, { runsDir });
 
-  assert.equal(run.status, "failed");
+  assert.equal(run.status, "halted_on_error");
   assert.match(run.error.message, /Transform output failed validation/);
 });
 
@@ -896,7 +896,7 @@ output {
 
   const run = await runRuneflow(parsed, {}, {}, { runsDir });
 
-  assert.equal(run.status, "failed");
+  assert.equal(run.status, "halted_on_error");
   assert.match(run.error.message, /transform 'reshape' expression failed/);
 });
 
@@ -1010,7 +1010,7 @@ output {
   process.env.RUNEFLOW_DISABLE_TRANSFORM = "1";
   try {
     const run = await runRuneflow(parsed, {}, {}, { runsDir });
-    assert.equal(run.status, "failed");
+    assert.equal(run.status, "halted_on_error");
     assert.match(run.error.message, /Transform steps are disabled/);
   } finally {
     if (prev === undefined) {
@@ -1019,4 +1019,386 @@ output {
       process.env.RUNEFLOW_DISABLE_TRANSFORM = prev;
     }
   }
+});
+
+test("const: frontmatter const values resolve in prompts, inputs, and tool args", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: const-test
+description: Const resolution
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+const:
+  greeting: "hello"
+  max_items: 5
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "{{ const.greeting }} — summarize up to {{ const.max_items }} items."
+  input: { limit: const.max_items }
+  schema: { result: string }
+}
+
+output {
+  result: steps.draft.result
+}
+\`\`\`
+`);
+
+  let receivedPrompt = null;
+  let receivedInput = null;
+
+  const run = await runRuneflow(parsed, {}, {
+    llms: {
+      "mock-default": async ({ prompt, input }) => {
+        receivedPrompt = prompt;
+        receivedInput = input;
+        return { result: "done" };
+      },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(receivedPrompt, "hello — summarize up to 5 items.");
+  assert.deepEqual(receivedInput, { limit: 5 });
+});
+
+test("matches: branch routes correctly on regex pattern", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: matches-test
+description: Matches operator
+version: 0.1
+inputs:
+  branch: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step get_branch type=tool {
+  tool: util.complete
+  with: { branch: inputs.branch }
+  out: { branch: string }
+}
+
+branch check {
+  if: steps.get_branch.branch matches "^feat/"
+  then: feature
+  else: other
+}
+
+step feature type=tool {
+  tool: util.complete
+  with: { result: "feature branch" }
+  out: { result: string }
+  next: finish
+}
+
+step other type=tool {
+  tool: util.complete
+  with: { result: "other branch" }
+  out: { result: string }
+  next: finish
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, { branch: "feat/my-feature" }, {}, { runsDir });
+  assert.equal(run.status, "success");
+  assert.deepEqual(run.steps.map((s) => s.id), ["get_branch", "check", "feature", "finish"]);
+
+  const run2 = await runRuneflow(parsed, { branch: "main" }, {}, { runsDir });
+  assert.equal(run2.status, "success");
+  assert.deepEqual(run2.steps.map((s) => s.id), ["get_branch", "check", "other", "finish"]);
+});
+
+test("skip_if: step is skipped when condition is true", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: skip-if-test
+description: skip_if
+version: 0.1
+inputs:
+  count: number
+outputs:
+  value: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  skip_if: inputs.count == 0
+  prompt: "Draft something."
+  schema: { value: string }
+}
+
+step fallback type=tool {
+  tool: util.complete
+  with: { value: "nothing to draft" }
+  out: { value: string }
+}
+
+output {
+  value: steps.fallback.value
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, { count: 0 }, {
+    llms: { "mock-default": async () => ({ value: "drafted" }) },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.steps[0].status, "skipped");
+  assert.equal(run.steps[0].outputs, null);
+  assert.equal(run.outputs.value, "nothing to draft");
+});
+
+test("skip_if: step executes normally when condition is false", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: skip-if-false
+description: skip_if false
+version: 0.1
+inputs:
+  count: number
+outputs:
+  value: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  skip_if: inputs.count == 0
+  prompt: "Draft something."
+  schema: { value: string }
+}
+
+output {
+  value: steps.draft.value
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, { count: 3 }, {
+    llms: { "mock-default": async () => ({ value: "drafted" }) },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.steps[0].status, "success");
+  assert.equal(run.outputs.value, "drafted");
+});
+
+test("halted_on_error: run status is halted_on_error with halted_step_id when step fails with no fallback", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: halt-test
+description: Halt on error
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step first type=tool {
+  tool: mock.first
+  out: { value: string }
+}
+
+step second type=tool {
+  tool: mock.second
+  out: { result: string }
+}
+
+output {
+  result: steps.second.result
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {
+    tools: {
+      "mock.first": async () => ({ value: "ok" }),
+      "mock.second": async () => { throw new Error("network timeout"); },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "halted_on_error");
+  assert.equal(run.halted_step_id, "second");
+  assert.match(run.error.message, /network timeout/);
+  assert.equal(run.steps[0].status, "success");
+  assert.equal(run.steps[1].status, "failed");
+
+  const artifact = JSON.parse(await fs.readFile(run.artifact_path, "utf8"));
+  assert.equal(artifact.status, "halted_on_error");
+  assert.equal(artifact.halted_step_id, "second");
+});
+
+test("input-hash caching: step with matching input hash is replayed from prior run", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cache-test
+description: Input hash caching
+version: 0.1
+inputs:
+  value: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step work type=tool {
+  tool: mock.work
+  with: { value: inputs.value }
+  out: { result: string }
+}
+
+output {
+  result: steps.work.result
+}
+\`\`\`
+`);
+
+  let callCount = 0;
+  const runtime = {
+    tools: {
+      "mock.work": async ({ value }) => {
+        callCount += 1;
+        return { result: `done:${value}` };
+      },
+    },
+  };
+
+  // First run — executes normally
+  const run1 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir });
+  assert.equal(run1.status, "success");
+  assert.equal(callCount, 1);
+  assert.ok(run1.steps[0].input_hash);
+
+  // Second run with same inputs and priorSteps — should use cache
+  const priorSteps = { work: run1.steps[0] };
+  const run2 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir, priorSteps });
+  assert.equal(run2.status, "success");
+  assert.equal(callCount, 1); // not called again
+  assert.equal(run2.steps[0].cached, true);
+  assert.equal(run2.outputs.result, "done:hello");
+});
+
+test("input-hash caching: changed inputs bypass cache and re-execute", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cache-miss-test
+description: Cache miss on changed inputs
+version: 0.1
+inputs:
+  value: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step work type=tool {
+  tool: mock.work
+  with: { value: inputs.value }
+  out: { result: string }
+}
+
+output {
+  result: steps.work.result
+}
+\`\`\`
+`);
+
+  let callCount = 0;
+  const runtime = {
+    tools: {
+      "mock.work": async ({ value }) => {
+        callCount += 1;
+        return { result: `done:${value}` };
+      },
+    },
+  };
+
+  const run1 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir });
+  assert.equal(callCount, 1);
+
+  // Different input — cache miss, re-executes
+  const priorSteps = { work: run1.steps[0] };
+  const run2 = await runRuneflow(parsed, { value: "world" }, runtime, { runsDir, priorSteps });
+  assert.equal(run2.status, "success");
+  assert.equal(callCount, 2);
+  assert.equal(run2.steps[0].cached, undefined);
+  assert.equal(run2.outputs.result, "done:world");
+});
+
+test("cache: false opt-out bypasses input-hash caching", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cache-opt-out
+description: cache false opt-out
+version: 0.1
+inputs:
+  value: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step work type=tool cache=false {
+  tool: mock.work
+  with: { value: inputs.value }
+  out: { result: string }
+}
+
+output {
+  result: steps.work.result
+}
+\`\`\`
+`);
+
+  let callCount = 0;
+  const runtime = {
+    tools: {
+      "mock.work": async ({ value }) => {
+        callCount += 1;
+        return { result: `done:${value}` };
+      },
+    },
+  };
+
+  const run1 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir });
+  assert.equal(callCount, 1);
+  assert.equal(run1.steps[0].input_hash, undefined);
+
+  // Even with priorSteps, cache=false forces re-execution
+  const priorSteps = { work: run1.steps[0] };
+  const run2 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir, priorSteps });
+  assert.equal(run2.status, "success");
+  assert.equal(callCount, 2);
+  assert.equal(run2.steps[0].cached, undefined);
 });

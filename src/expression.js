@@ -80,7 +80,7 @@ function tokenize(expression) {
 
     const value = identifier[0];
 
-    if (value === "and" || value === "or" || value === "not") {
+    if (value === "and" || value === "or" || value === "not" || value === "matches") {
       tokens.push({ type: "keyword", value });
     } else if (value === "true" || value === "false") {
       tokens.push({ type: "boolean", value: value === "true" });
@@ -169,6 +169,21 @@ function buildParser(tokens) {
     let left = parseUnary();
 
     while (true) {
+      if (match("keyword", "matches")) {
+        const pattern = peek();
+        if (!pattern || pattern.type !== "string") {
+          throw new SkillSyntaxError("'matches' operator requires a string pattern.");
+        }
+        consume();
+        left = {
+          type: "binary",
+          operator: "matches",
+          left,
+          right: { type: "literal", value: pattern.value },
+        };
+        continue;
+      }
+
       const operator = match("operator", "==") || match("operator", "!=");
       if (!operator) {
         return left;
@@ -231,6 +246,10 @@ export function parseExpression(expression) {
 function resolvePath(pathExpression, state) {
   const segments = pathExpression.split(".");
 
+  if (segments[0] === "const") {
+    return getByPath(state.consts ?? {}, segments.slice(1));
+  }
+
   if (segments[0] === "inputs") {
     return getByPath(state.inputs, segments.slice(1));
   }
@@ -287,6 +306,9 @@ function evaluateAst(node, state) {
         return left === right;
       case "!=":
         return left !== right;
+      case "matches":
+        if (typeof left !== "string") return false;
+        return new RegExp(right).test(left);
       case "and":
         return Boolean(left) && Boolean(right);
       case "or":
@@ -365,7 +387,7 @@ export function resolveTemplate(template, state) {
 }
 
 export function looksLikeExpression(value) {
-  return typeof value === "string" && /\b(?:inputs|steps)\./.test(value);
+  return typeof value === "string" && /\b(?:const|inputs|steps)\./.test(value);
 }
 
 export function evaluateExpression(expression, state) {

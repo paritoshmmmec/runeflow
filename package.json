@@ -3,17 +3,30 @@
   "version": "0.1.0",
   "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "registry/",
+    "examples/",
+    "README.md"
+  ],
   "bin": {
     "runeflow": "./bin/runeflow.js"
   },
   "scripts": {
     "test": "node --test",
     "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md",
+    "validate:block-demo": "node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md",
+    "validate:release-notes": "node ./bin/runeflow.js validate ./examples/release-notes.runeflow.md",
     "eval:open-pr": "node --env-file=.env ./eval/open-pr.js --base-branch main",
     "eval:3p": "node --env-file=.env ./eval/3p-updates.js",
     "eval:addresszen": "node --env-file=.env ./eval/addresszen-automation.js --delay-ms 5000",
     "eval:adyntel": "node --env-file=.env ./eval/adyntel-automation.js --mode both --delay-ms 8000",
-    "validate:block-demo": "node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md"
+    "eval:release-notes": "node --env-file=.env ./eval/release-notes.js"
   },
   "dependencies": {
     "tiktoken": "^1.0.22",

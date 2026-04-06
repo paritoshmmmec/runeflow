@@ -140,6 +140,36 @@ Alpha means: public enough to get feedback on the model. Known rough edges are a
 
 ---
 
+## Open Questions
+
+**Agentic system integration — highest priority question**
+
+Integration is more valuable than a standalone tool. The key unknown is where Runeflow fits in the execution flow of existing agentic systems.
+
+Current agents like Claude Code and Codex load skill files as raw context before calling the model. The ideal integration point is between "agent loads skill file" and "agent calls LLM" — so Runeflow processes the skill first and only the projected, resolved context reaches the model. That's exactly the token reduction mechanism the benchmarks prove.
+
+The options, depending on what hook points each agent exposes:
+
+- **Pre-processing**: `runeflow project` outputs a clean projected Markdown file that the agent loads instead of the raw skill. Agent never sees the execution block.
+- **Tool registration**: register `runeflow_run` as a custom tool in the agent's tool chain. Agent calls the tool, gets structured outputs, never interprets the skill directly.
+- **Subprocess wrapper**: agent calls `runeflow exec` as a subprocess tool, gets JSON back. Cleanest separation — agent never sees skill internals.
+
+Unknown: how Claude Code, Codex, Cursor, and similar agents actually load and process skill files today, and what interception points they expose. This needs hands-on investigation with each system before committing to an integration approach.
+
+**MCP server**
+
+An `runeflow-mcp` server exposing `runeflow_run` as an MCP tool would let any MCP-compatible agent execute Runeflow skills directly. The adyntel and addresszen benchmarks already prove the token reduction story for MCP-heavy workflows — this closes the loop. Effort is medium, leverage is high.
+
+**Skill discovery convention**
+
+A standard location (`.runeflow/skills/`) and a discovery convention in `AGENTS.md` would let any agent that reads repo context find and execute skills without explicit configuration. Zero runtime work, just a convention.
+
+**When to prioritize integration over standalone features**
+
+The standalone alpha gate (tools CLI, third example, README) is still the right first step — you need something solid to integrate. But the integration question should drive what gets built after alpha, not more DSL features.
+
+---
+
 ## Sequence
 
 ```

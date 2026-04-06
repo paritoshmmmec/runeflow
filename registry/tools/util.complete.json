@@ -1,0 +1,5 @@
+{
+  "name": "util.complete",
+  "description": "Pass-through tool — returns its input as output. Useful for assembling outputs from multiple steps.",
+  "tags": ["builtin", "control"]
+}

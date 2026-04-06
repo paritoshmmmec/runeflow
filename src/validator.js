@@ -106,8 +106,15 @@ function validateLlmConfig(config, location, issues) {
   }
 }
 
-function validateReferencePath(pathExpression, availableInputs, availableSteps, issues, location) {
+function validateReferencePath(pathExpression, availableInputs, availableConsts, availableSteps, issues, location) {
   const segments = pathExpression.split(".");
+
+  if (segments[0] === "const") {
+    if (!shapeHasPath(availableConsts, segments.slice(1))) {
+      issues.push(`${location}: unknown const reference '${pathExpression}'`);
+    }
+    return;
+  }
 
   if (segments[0] === "inputs") {
     if (!shapeHasPath(availableInputs, segments.slice(1))) {
@@ -150,6 +157,7 @@ export function validateSkill(definition, options = {}) {
   const warnings = [];
   const workflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} });
   const { metadata } = definition;
+  const consts = definition.consts ?? {};
   const seenStepIds = new Set();
   const toolRegistry = loadToolRegistry(options);
 
@@ -258,6 +266,10 @@ export function validateSkill(definition, options = {}) {
     if (step.retry !== undefined && (!Number.isInteger(step.retry) || step.retry < 0)) {
       issues.push(`step '${step.id}' retry must be a non-negative integer`);
     }
+
+    if (step.skip_if !== undefined && typeof step.skip_if !== "string") {
+      issues.push(`step '${step.id}' skip_if must be an expression string`);
+    }
   }
 
   const llmSteps = workflow.steps.filter((step) => step.kind === "llm");
@@ -330,7 +342,19 @@ export function validateSkill(definition, options = {}) {
 
     for (const reference of references) {
       for (const pathExpression of reference.paths) {
-        validateReferencePath(pathExpression, metadata.inputs, availableSteps, issues, reference.location);
+        validateReferencePath(pathExpression, metadata.inputs, consts, availableSteps, issues, reference.location);
+      }
+    }
+
+    // validate skip_if references
+    if (step.skip_if && typeof step.skip_if === "string") {
+      try {
+        const skipPaths = collectExpressionPaths(step.skip_if);
+        for (const pathExpression of skipPaths) {
+          validateReferencePath(pathExpression, metadata.inputs, consts, availableSteps, issues, `step '${step.id}' skip_if`);
+        }
+      } catch (error) {
+        issues.push(`step '${step.id}' skip_if: ${error.message}`);
       }
     }
 
@@ -344,7 +368,7 @@ export function validateSkill(definition, options = {}) {
   const outputRefs = collectReferences(workflow.output, issues, "output");
   for (const reference of outputRefs) {
     for (const pathExpression of reference.paths) {
-      validateReferencePath(pathExpression, metadata.inputs, availableSteps, issues, reference.location);
+      validateReferencePath(pathExpression, metadata.inputs, consts, availableSteps, issues, reference.location);
     }
   }
 

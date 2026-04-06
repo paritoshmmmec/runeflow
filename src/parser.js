@@ -183,7 +183,7 @@ function parseStep(header, body) {
   const attributes = parseHeaderAttributes(attributesSource);
   const properties = parseBlockProperties(body);
 
-  return {
+  const step = {
     id,
     kind: attributes.type ?? null,
     retry: attributes.retry ? Number(attributes.retry) : 0,
@@ -192,6 +192,8 @@ function parseStep(header, body) {
     failMessage: properties.fail_message ?? null,
     ...properties,
   };
+  if (attributes.cache === "false") step.cache = false;
+  return step;
 }
 
 function parseBlockTemplate(header, body) {
@@ -205,7 +207,7 @@ function parseBlockTemplate(header, body) {
   const attributes = parseHeaderAttributes(attributesSource);
   const properties = parseBlockProperties(body);
 
-  return {
+  const block = {
     id,
     kind: attributes.type ?? null,
     retry: attributes.retry ? Number(attributes.retry) : 0,
@@ -214,6 +216,8 @@ function parseBlockTemplate(header, body) {
     failMessage: properties.fail_message ?? null,
     ...properties,
   };
+  if (attributes.cache === "false") block.cache = false;
+  return block;
 }
 
 function parseBranch(header, body) {
@@ -310,6 +314,7 @@ export function parseSkill(source, options = {}) {
       outputs: frontmatter.outputs ?? {},
       llm: frontmatter.llm ?? null,
     },
+    consts: frontmatter.const ?? {},
     docs: cleanedBody,
     docBlocks,
     workflow,
