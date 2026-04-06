@@ -7,7 +7,7 @@
 The runtime owns 100% of workflow logic. The LLM only participates where you explicitly say so.
 
 [![npm version](https://img.shields.io/npm/v/runeflow?color=blueviolet)](https://www.npmjs.com/package/runeflow)
-[![tests](https://img.shields.io/badge/tests-59%20passing-brightgreen)](#)
+[![CI](https://github.com/paritoshmmmec/runeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/paritoshmmmec/runeflow/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![node](https://img.shields.io/badge/node-%3E%3D20-green)](#)
 

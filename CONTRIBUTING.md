@@ -16,7 +16,7 @@ Thanks for your interest. Runeflow is in active alpha — contributions are welc
 ## 🛠️ Setup
 
 ```bash
-git clone https://github.com/your-org/runeflow
+git clone https://github.com/paritoshmmmec/runeflow
 cd runeflow
 npm install
 npm test
