@@ -92,7 +92,9 @@ export async function runInit(options = {}) {
   });
 
   try {
-    console.log("\n⚡ runeflow init\n");
+    const log = options.silent ? () => {} : console.log;
+
+    log("\n⚡ runeflow init\n");
 
     const name = options.name ?? await ask(rl, "Skill name", "my-skill");
     const description = options.description ?? await ask(rl, "What does it do", `${name} skill`);

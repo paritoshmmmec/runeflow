@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/cli.js";
+import { runInit } from "../src/init.js";
 
 async function captureStdout(fn) {
   const originalLog = console.log;
@@ -277,14 +278,13 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
   process.chdir(tempDir);
 
   try {
-    // Simulate non-interactive by passing options directly via the init module
-    const { runInit } = await import("../src/init.js");
     await runInit({
       name: "my-skill",
       description: "Test skill",
       provider: "cerebras",
       model: "qwen-3-235b-a22b-instruct-2507",
       cwd: tempDir,
+      silent: true,
     });
 
     const skillContent = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
