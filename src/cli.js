@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assembleRuneflow } from "./assembler.js";
 import { importMarkdownRuneflow } from "./importer.js";
+import { runInit } from "./init.js";
 import { parseRuneflow } from "./parser.js";
 import { runRuneflow } from "./runtime.js";
 import { loadToolRegistry } from "./tool-registry.js";
@@ -115,14 +116,26 @@ export async function runCli(argv) {
 
   if (!command || command === "help" || command === "--help") {
     console.log(`Usage:
+  runeflow init [--name <name>] [--provider <provider>]
   runeflow validate <file>
-  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
+  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
   runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow import <file> [--output converted.runeflow.md]
   runeflow tools list
   runeflow tools inspect <tool-name>`);
+    return;
+  }
+
+  if (command === "init") {
+    await runInit({
+      name: options.name,
+      description: options.description,
+      provider: options.provider,
+      model: options.model,
+      force: options.force !== undefined,
+    });
     return;
   }
 
@@ -146,6 +159,7 @@ export async function runCli(argv) {
     const input = await loadInput(options.input);
     const run = await runRuneflow(definition, input, runtime, {
       runsDir: options["runs-dir"] ? path.resolve(process.cwd(), options["runs-dir"]) : undefined,
+      force: options.force !== undefined,
     });
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {

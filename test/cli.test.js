@@ -269,3 +269,33 @@ output {
     process.chdir(originalCwd);
   }
 });
+
+test("runCli init: creates skill file and runtime.js non-interactively", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-init-"));
+  const originalCwd = process.cwd();
+
+  process.chdir(tempDir);
+
+  try {
+    // Simulate non-interactive by passing options directly via the init module
+    const { runInit } = await import("../src/init.js");
+    await runInit({
+      name: "my-skill",
+      description: "Test skill",
+      provider: "cerebras",
+      model: "qwen-3-235b-a22b-instruct-2507",
+      cwd: tempDir,
+    });
+
+    const skillContent = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
+    const runtimeContent = await fs.readFile(path.join(tempDir, "runtime.js"), "utf8");
+
+    assert.ok(skillContent.includes("name: my-skill"));
+    assert.ok(skillContent.includes("provider: cerebras"));
+    assert.ok(skillContent.includes("Test skill"));
+    assert.ok(runtimeContent.includes("createDefaultRuntime"));
+    assert.ok(runtimeContent.includes("CEREBRAS_API_KEY"));
+  } finally {
+    process.chdir(originalCwd);
+  }
+});

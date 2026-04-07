@@ -345,8 +345,9 @@ runeflow tools inspect git.diff_summary
 ## 🖥️ CLI Reference
 
 ```bash
+runeflow init [--name <name>] [--provider <provider>]
 runeflow validate <file>
-runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs]
+runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
 runeflow resume <file> [--runtime ./runtime.js]
 runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
 runeflow inspect-run <run-id>
@@ -500,9 +501,101 @@ step push type=tool cache=false {
 
 | Phase | Status | What |
 |---|---|---|
-| v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble` |
-| v0.2 | 🔜 next | `human_input` step, auth waterfall, `runeflow-registry` package |
+| v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
+| v0.2 | 🔜 next | `human_input` step (design TBD), `runeflow watch`, parallel tool steps |
 | v0.3 | 📅 planned | MCP server, `runeflow build` (LLM → skill compiler), agent integration |
+
+---
+
+## 🔗 Integration Modes
+
+Runeflow supports three ways to integrate. Pick the one that fits your setup.
+
+### Mode 1 — Top-Level Executor ✅
+
+Runeflow runs the full skill end-to-end. Your code calls `runRuneflow`, the runtime owns every step — tool calls, LLM calls, branching, retries, artifacts. You get structured JSON outputs and a full run trace.
+
+```js
+import { parseRuneflow, runRuneflow, createDefaultRuntime } from "runeflow";
+import fs from "node:fs/promises";
+
+const source = await fs.readFile("./draft-pr.runeflow.md", "utf8");
+const definition = parseRuneflow(source);
+const runtime = createDefaultRuntime();
+
+const run = await runRuneflow(definition, { base_branch: "main" }, runtime);
+console.log(run.outputs); // { title: "...", body: "..." }
+```
+
+Or via CLI:
+
+```bash
+runeflow run ./draft-pr.runeflow.md --input '{"base_branch":"main"}' --runtime ./runtime.js
+```
+
+Best for: standalone automation scripts, CI/CD pipelines, backend services, scheduled jobs.
+
+---
+
+### Mode 2 — Assemble (Preprocessor for Agents) ✅
+
+You run `runeflow assemble` before invoking an agent. Runeflow executes all the deterministic setup steps (git, file reads, API calls), resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file instead of the raw skill — it sees only what it needs for one step.
+
+```bash
+runeflow assemble ./draft-pr.runeflow.md \
+  --step draft \
+  --input '{"base_branch":"main"}' \
+  --output context.md
+```
+
+The output contains the resolved prompt, operator docs, resolved input, and output schema. No `runeflow` block, no tool wiring, no DSL. The agent makes one focused LLM call.
+
+```md
+# draft-pr — assembled context for `draft`
+
+## Guidance
+Write a concise PR title and body...
+
+## Your task
+Draft a PR for feat/my-feature → main.
+Changed files: ["src/runtime.js", "src/cli.js"]
+Diff: src/runtime.js | 45 +++...
+
+## Output schema
+{ "title": "string", "body": "string" }
+```
+
+This is how the -82% token reduction works in practice — the agent never sees orchestration instructions.
+
+Best for: Claude Code, Codex, Cursor, or any agent that reads files as context. Works today with zero agent integration required.
+
+---
+
+### Mode 3 — MCP Server 🔜 v0.3
+
+`runeflow-mcp` exposes `runeflow_run` as an MCP tool. Any MCP-compatible agent calls it directly — no preprocessing step, no file handoff. The agent passes the skill path and inputs, Runeflow executes the full workflow, returns structured outputs.
+
+```json
+{
+  "tool": "runeflow_run",
+  "arguments": {
+    "skill": "./draft-pr.runeflow.md",
+    "inputs": { "base_branch": "main" }
+  }
+}
+```
+
+The agent never sees the skill internals. It just gets back `{ title, body }`.
+
+Best for: Claude Code with MCP configured, Cursor agents, any system that supports the Model Context Protocol.
+
+---
+
+| Mode | Status | Agent integration needed | Best for |
+|---|---|---|---|
+| Top-level executor | ✅ now | None — you call it directly | Scripts, CI/CD, backends |
+| Assemble | ✅ now | None — agent loads a file | Claude Code, Codex, Cursor |
+| MCP server | 🔜 v0.3 | MCP client support | Any MCP-compatible agent |
 
 ---
 

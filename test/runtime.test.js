@@ -1546,3 +1546,49 @@ output {
   assert.equal(run.status, "success");
   assert.equal(run.outputs.code, 2);
 });
+
+test("--force bypasses input-hash cache and re-executes steps", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: force-test
+description: Force bypass cache
+version: 0.1
+inputs:
+  value: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step work type=tool {
+  tool: mock.work
+  with: { value: inputs.value }
+  out: { result: string }
+}
+
+output {
+  result: steps.work.result
+}
+\`\`\`
+`);
+
+  let callCount = 0;
+  const runtime = {
+    tools: {
+      "mock.work": async ({ value }) => {
+        callCount += 1;
+        return { result: `done:${value}` };
+      },
+    },
+  };
+
+  const run1 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir });
+  assert.equal(callCount, 1);
+
+  // With priorSteps but force=true — should re-execute despite matching hash
+  const priorSteps = { work: run1.steps[0] };
+  const run2 = await runRuneflow(parsed, { value: "hello" }, runtime, { runsDir, priorSteps, force: true });
+  assert.equal(run2.status, "success");
+  assert.equal(callCount, 2);
+  assert.equal(run2.steps[0].cached, undefined);
+});

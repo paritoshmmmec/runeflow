@@ -276,7 +276,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     const hookEvents = [];
 
     // Input-hash caching / resume: replay prior successful or skipped steps
-    if (step.cache !== false && options.priorSteps) {
+    if (step.cache !== false && options.priorSteps && !options.force) {
       const priorStep = options.priorSteps[step.id];
 
       // Replay a previously skipped step as-is
