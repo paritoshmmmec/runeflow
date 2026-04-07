@@ -42,6 +42,8 @@ Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 
 > On orchestration-heavy tasks, raw skills fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
 
+> 🤙 The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.runeflow.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
+
 ---
 
 ## 🚀 Quickstart
