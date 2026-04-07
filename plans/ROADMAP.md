@@ -3,7 +3,7 @@
 ## What Runeflow Is
 
 A hybrid runtime for executable AI skills. A skill is one file combining:
-- human-facing Markdown guidance
+- human-readable Markdown guidance
 - a fenced `runeflow` execution block
 - JSON artifacts for every run and step
 
@@ -15,16 +15,17 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 - **-38% input tokens** on synthesis tasks
 - **Zero-shot failure prevention** — raw skills fall into tool discovery loops; Runeflow eliminates this entirely
 - **Neutral overhead** on simple tasks
+- **PR #1 to this repo was opened by Runeflow itself** — using `open-pr-gh.runeflow.md`
 
 ---
 
-## Current State (v0.1.0 — published)
+## Shipped (v0.1.x)
 
 ### Step kinds
 `tool`, `llm`, `branch`, `transform`, `block`, `cli`
 
 ### Control flow
-`retry`, `fallback`, `fail`, `next`, `skip_if`, `cache=false`, `allow_failure`
+`retry`, `fallback`, `fail`, `next`, `skip_if`, `cache=false`, `allow_failure`, `--force`
 
 ### Authoring
 - `const` in frontmatter
@@ -38,12 +39,13 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 - `halted_on_error` status + `halted_step_id`
 - Input-hash caching + `runeflow resume`
 - Schema validation on inputs (registry-backed) and outputs
+- Auth waterfall: env → `.env` → `~/.runeflow/credentials.json`
 - JSON artifacts per run and step
 
 ### CLI
-`validate`, `run`, `resume`, `inspect-run`, `import`, `tools list`, `tools inspect`, `assemble`
+`init`, `validate`, `run` (+ `--force`), `resume`, `inspect-run`, `import`, `tools list`, `tools inspect`, `assemble`
 
-### Built-in tools
+### Built-in tools (10)
 `git.current_branch`, `git.diff_summary`, `git.push_current_branch`, `git.log`, `git.tag_list`,
 `file.exists`, `file.read`, `file.write`, `util.complete`, `util.fail`
 
@@ -54,67 +56,26 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 - Schemas: GitHub, Linear, gh CLI, npm, docker, kubectl, curl
 
 ### Default runtime
-`createDefaultRuntime()` — cerebras, openai, anthropic, zero config
+`createDefaultRuntime()` — powered by Vercel AI SDK, supports cerebras, openai, anthropic, groq, mistral, google
 
 ### Assembler
 `assembleRuneflow()` — renders clean context file for a specific llm step (agent integration)
 
+### runeflow-registry (scaffolded, not yet published)
+`packages/runeflow-registry/` — github, linear, slack, notion providers with schemas + implementations
+
 ---
 
-## Wave 2 — Remaining (v0.2)
+## Next: Wave 2 remaining
 
-### `human_input` step
-Pause execution, prompt terminal user, resume with answer.
+### 1. Publish `runeflow-registry` to npm
+The package is scaffolded at `packages/runeflow-registry/`. Needs:
+- Tests for each provider (mock the SDK calls)
+- `npm publish` from `packages/runeflow-registry/`
+- Add to README install instructions
 
-```runeflow
-step confirm type=human_input {
-  prompt: "Deploy to production? (yes/no)"
-  choices: ["yes", "no"]
-  out: { answer: string }
-}
-```
-
-- Constrained choices or free text
-- State persisted before pause so `resume` works
-- `--non-interactive` flag skips with default answer in CI
-
-### `runeflow-registry` package
-
-A separate npm package where schema + implementation travel together.
-
-```bash
-npm install runeflow runeflow-registry
-```
-
-```js
-import { createDefaultRuntime } from "runeflow";
-import { github, slack, linear } from "runeflow-registry";
-
-export default {
-  ...createDefaultRuntime(),
-  tools: {
-    ...github({ token: process.env.GITHUB_TOKEN }),
-    ...slack({ token: process.env.SLACK_BOT_TOKEN }),
-    ...linear({ apiKey: process.env.LINEAR_API_KEY }),
-  },
-};
-```
-
-Package structure:
-```
-runeflow-registry/
-├── index.js
-└── providers/
-    ├── github/   { tools(config), schemas }  — @octokit/rest
-    ├── linear/   { tools(config), schemas }  — @linear/sdk
-    ├── slack/    { tools(config), schemas }  — @slack/web-api
-    └── notion/   { tools(config), schemas }  — @notionhq/client
-```
-
-Each provider is opt-in. Auth passed at construction, not via env vars inside tools.
-
-### Parallel tool steps
-Fan out N tool calls, join outputs. Constrained to `tool` steps only.
+### 2. Parallel tool steps
+Fan out N tool calls, join outputs. Constrained to `tool` steps only — no LLM or branch in parallel.
 
 ```runeflow
 parallel gather {
@@ -124,29 +85,38 @@ parallel gather {
 ```
 
 Cuts latency on multi-source workflows (3p-updates, incident summaries) from sequential to concurrent.
+Touches: `src/runtime.js`, `src/validator.js`, `src/parser.js`
 
-### `--force` flag on `run`
-Bypass all caches: `runeflow run skill.md --force`
+### 3. `human_input` step (design TBD)
+Pause execution, collect user input, resume. The challenge: input can be deep in a workflow and may depend on prior step outputs. Two open design questions:
 
-### `runeflow init`
-Scaffold a new skill interactively. Asks what you want to build, generates the `.runeflow.md` and `runtime.js`.
+- **Shallow case** (`prompt.*` namespace): values known before execution, supplied via `--prompt` flag or `promptHandler` option
+- **Deep case** (`halted_on_input` status): runtime halts intentionally at the step, persists state, user supplies answer, `runeflow resume` continues
+
+Parking until the design is clear. The `resume` + `halted_on_error` machinery already handles the deep case mechanically — just needs the intentional halt trigger and a way to surface the question.
+
+### 4. `runeflow watch`
+Run a skill on a schedule or file change.
 
 ```bash
-runeflow init
-# → What does this skill do? Draft a PR from the current branch
-# → Which provider? cerebras
-# → Writes: draft-pr.runeflow.md + runtime.js
+runeflow watch ./standup.runeflow.md --cron "0 9 * * 1-5"
+runeflow watch ./lint-check.runeflow.md --on-change "src/**/*.js"
 ```
 
-Lowers the barrier to entry — new users get a working skill in under 2 minutes.
+Turns skills into background automations. Touches: `src/cli.js` + a scheduler (node-cron or chokidar).
 
 ---
 
 ## Wave 3 — Agent Integration (v0.3)
 
 ### MCP server (`runeflow-mcp`)
-Exposes `runeflow_run` as an MCP tool. Any MCP-compatible agent executes skills directly.
-Closes the loop on the token reduction story — no manual `assemble` step needed.
+Exposes `runeflow_run` as an MCP tool. Any MCP-compatible agent (Claude Code, Cursor, Codex) executes skills directly — no preprocessing step, no file handoff.
+
+```json
+{ "tool": "runeflow_run", "arguments": { "skill": "./draft-pr.runeflow.md", "inputs": { "base_branch": "main" } } }
+```
+
+Highest leverage integration item. Closes the loop on the token reduction story.
 
 ### `runeflow build`
 Planner LLM compiles English → runeflow block.
@@ -158,30 +128,9 @@ runeflow build "draft a PR from the current branch" --output draft-pr.runeflow.m
 Standard location: `.runeflow/skills/` + convention in `AGENTS.md`.
 Agents find and execute skills without explicit configuration.
 
-### `runeflow watch`
-Run a skill on a schedule or file change. Turns skills into background automations.
-
-```bash
-runeflow watch ./standup.runeflow.md --cron "0 9 * * 1-5"
-runeflow watch ./lint-check.runeflow.md --on-change "src/**/*.js"
-```
-
 ---
 
 ## Wave 4 — Scale & DX (v0.4)
-
-### Skill composition / imports
-One skill calling another, or sharing block libraries across files.
-
-```runeflow
-import blocks from "./shared/pr-blocks.runeflow.md"
-
-step draft type=block {
-  block: blocks.draft_pr_template
-}
-```
-
-Enables team-scale skill libraries. Artifact traces show where imported content came from.
 
 ### `runeflow test`
 Test harness for skills. Run with fixture inputs, assert on outputs, mock LLM responses.
@@ -190,28 +139,40 @@ Test harness for skills. Run with fixture inputs, assert on outputs, mock LLM re
 runeflow test ./draft-pr.runeflow.md --fixture ./tests/draft-pr.fixture.json
 ```
 
-Makes skills maintainable — catch regressions before running for real.
+### Skill composition / imports
+One skill calling another, or sharing block libraries across files.
+
+```runeflow
+import blocks from "./shared/pr-blocks.runeflow.md"
+```
 
 ### TypeScript types
-Add `types/index.d.ts` with full type coverage for `runRuneflow`, `createDefaultRuntime`, `assembleRuneflow`, etc. Zero runtime cost, full IDE autocomplete.
+`types/index.d.ts` — full type coverage for `runRuneflow`, `createDefaultRuntime`, `assembleRuneflow`. Zero runtime cost, full IDE autocomplete.
 
 ### Observability
-Structured telemetry via OpenTelemetry. `--telemetry` flag emits spans for each step — plugs into Datadog, Honeycomb, Grafana without custom hooks.
+`--telemetry` flag emits OpenTelemetry spans per step. Plugs into Datadog, Honeycomb, Grafana.
 
 ### Skill versioning + migration
-`runeflow migrate` updates skill syntax when the DSL changes. Makes upgrades safe across teams.
+`runeflow migrate` updates skill syntax when the DSL changes.
+
+---
+
+## Integration Modes (all three supported)
+
+| Mode | Status | How |
+|---|---|---|
+| Top-level executor | ✅ | `runRuneflow()` or `runeflow run` |
+| Assemble (preprocessor) | ✅ | `runeflow assemble` → agent loads context file |
+| MCP server | 🔜 v0.3 | `runeflow-mcp` exposes `runeflow_run` as MCP tool |
 
 ---
 
 ## User-Provided Schemas
 
-Two ways to extend the registry:
-
 **Project-level directory** — drop JSON files in `<project>/registry/tools/`:
 ```json
 {
   "name": "stripe.charge",
-  "description": "Create a Stripe charge.",
   "inputSchema": { "type": "object", "properties": { "amount": { "type": "number" } }, "required": ["amount"] },
   "outputSchema": { "type": "object", "properties": { "charge_id": { "type": "string" } }, "required": ["charge_id"] }
 }
@@ -220,9 +181,7 @@ Two ways to extend the registry:
 **Programmatic** — pass `toolRegistry` to `runRuneflow` / `validateRuneflow`:
 ```js
 await runRuneflow(definition, inputs, runtime, {
-  toolRegistry: [
-    { name: "stripe.charge", inputSchema: { ... }, outputSchema: { ... } }
-  ],
+  toolRegistry: [{ name: "stripe.charge", inputSchema: { ... }, outputSchema: { ... } }],
 });
 ```
 
@@ -240,7 +199,7 @@ await runRuneflow(definition, inputs, runtime, {
 
 ## Open Questions
 
-- How do Claude Code, Codex, Cursor load skill files — as raw context or as tools? Determines whether `assemble` or MCP is the right integration point.
-- Should `human_input` steps be skippable in CI mode (`--non-interactive`)?
-- At what point does the caching layer need a storage backend beyond flat JSON?
-- Should `runeflow-registry` providers auto-register their schemas so `tools list` picks them up without a registry dir?
+- `human_input` deep in workflow — `halted_on_input` status + resume, or `prompt.*` namespace, or both?
+- Should `runeflow-registry` providers auto-register schemas so `tools list` picks them up without a registry dir?
+- At what point does the caching layer need a storage backend beyond flat JSON files?
+- `runeflow watch` — node-cron for scheduling, chokidar for file watching, or both?

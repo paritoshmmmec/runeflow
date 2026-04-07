@@ -1,0 +1,26 @@
+{
+  "name": "runeflow-registry",
+  "version": "0.1.0",
+  "description": "Official tool registry for Runeflow — schemas and implementations for GitHub, Linear, Slack, and more",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./github": "./providers/github/index.js",
+    "./linear": "./providers/linear/index.js",
+    "./slack": "./providers/slack/index.js",
+    "./notion": "./providers/notion/index.js"
+  },
+  "peerDependencies": {
+    "runeflow": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@octokit/rest":       { "optional": true },
+    "@linear/sdk":         { "optional": true },
+    "@slack/web-api":      { "optional": true },
+    "@notionhq/client":    { "optional": true }
+  },
+  "keywords": ["runeflow", "tools", "registry", "github", "linear", "slack", "notion"]
+}

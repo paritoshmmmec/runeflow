@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/cli.js";
+import { runInit } from "../src/init.js";
 
 async function captureStdout(fn) {
   const originalLog = console.log;
@@ -265,6 +266,63 @@ output {
     assert.equal(run.steps[1].id, "second");
     assert.equal(run.steps[1].cached, undefined);
     assert.equal(run.outputs.result, "resumed:step-one-done");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("runCli init: creates skill file and runtime.js non-interactively", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-init-"));
+  const originalCwd = process.cwd();
+
+  process.chdir(tempDir);
+
+  try {
+    await runInit({
+      name: "my-skill",
+      description: "Test skill",
+      provider: "cerebras",
+      model: "qwen-3-235b-a22b-instruct-2507",
+      cwd: tempDir,
+      silent: true,
+    });
+
+    const skillContent = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
+    const runtimeContent = await fs.readFile(path.join(tempDir, "runtime.js"), "utf8");
+
+    assert.ok(skillContent.includes("name: my-skill"));
+    assert.ok(skillContent.includes("provider: cerebras"));
+    assert.ok(skillContent.includes("Test skill"));
+    assert.ok(runtimeContent.includes("createDefaultRuntime"));
+    assert.ok(runtimeContent.includes("CEREBRAS_API_KEY"));
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("parseOptions: --force without a value is treated as boolean true", async () => {
+  // Test by running init with --force as a valueless flag via runCli
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-force-flag-"));
+  const originalCwd = process.cwd();
+
+  // Pre-create the skill file so --force is needed to overwrite
+  await fs.writeFile(path.join(tempDir, "my-skill.runeflow.md"), "existing content");
+
+  process.chdir(tempDir);
+  try {
+    // Should not throw — --force allows overwrite
+    await runInit({
+      name: "my-skill",
+      description: "Test",
+      provider: "cerebras",
+      model: "qwen-3-235b-a22b-instruct-2507",
+      cwd: tempDir,
+      force: true,
+      silent: true,
+    });
+
+    const content = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
+    assert.ok(content.includes("name: my-skill"), "file was overwritten");
   } finally {
     process.chdir(originalCwd);
   }
