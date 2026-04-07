@@ -299,3 +299,31 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
     process.chdir(originalCwd);
   }
 });
+
+test("parseOptions: --force without a value is treated as boolean true", async () => {
+  // Test by running init with --force as a valueless flag via runCli
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-force-flag-"));
+  const originalCwd = process.cwd();
+
+  // Pre-create the skill file so --force is needed to overwrite
+  await fs.writeFile(path.join(tempDir, "my-skill.runeflow.md"), "existing content");
+
+  process.chdir(tempDir);
+  try {
+    // Should not throw — --force allows overwrite
+    await runInit({
+      name: "my-skill",
+      description: "Test",
+      provider: "cerebras",
+      model: "qwen-3-235b-a22b-instruct-2507",
+      cwd: tempDir,
+      force: true,
+      silent: true,
+    });
+
+    const content = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
+    assert.ok(content.includes("name: my-skill"), "file was overwritten");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});

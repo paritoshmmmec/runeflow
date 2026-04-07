@@ -26,9 +26,15 @@ function parseOptions(argumentsList) {
     }
 
     const key = token.slice(2);
-    const value = argumentsList[index + 1];
-    options[key] = value;
-    index += 1;
+    const next = argumentsList[index + 1];
+
+    // Treat as a boolean flag if no next token, or next token is another flag
+    if (next === undefined || next.startsWith("--")) {
+      options[key] = true;
+    } else {
+      options[key] = next;
+      index += 1;
+    }
   }
 
   return { positional, options };
@@ -134,7 +140,7 @@ export async function runCli(argv) {
       description: options.description,
       provider: options.provider,
       model: options.model,
-      force: options.force !== undefined,
+      force: Boolean(options.force),
     });
     return;
   }
@@ -159,7 +165,7 @@ export async function runCli(argv) {
     const input = await loadInput(options.input);
     const run = await runRuneflow(definition, input, runtime, {
       runsDir: options["runs-dir"] ? path.resolve(process.cwd(), options["runs-dir"]) : undefined,
-      force: options.force !== undefined,
+      force: Boolean(options.force),
     });
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {
