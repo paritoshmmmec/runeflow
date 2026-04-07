@@ -1,0 +1,30 @@
+{
+  "name": "npm.run",
+  "description": "Run an npm script in the current working directory.",
+  "tags": ["npm", "cli", "build"],
+  "cliCommand": "npm run",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "script": { "type": "string", "description": "Script name from package.json." },
+      "args": { "type": "string", "description": "Optional extra arguments passed after --." }
+    },
+    "required": ["script"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "stdout": { "type": "string" },
+      "stderr": { "type": "string" },
+      "exit_code": { "type": "number" }
+    },
+    "required": ["stdout", "stderr", "exit_code"],
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "step": "step run_tests type=cli {\n  command: \"npm test --run\"\n  out: { stdout: string, stderr: string, exit_code: number }\n}"
+    }
+  ]
+}

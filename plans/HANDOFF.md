@@ -1,93 +1,178 @@
 # Session Handoff
 
-## What Was Built This Session
-
-### Features shipped (all tested, 54/54 passing)
-- Lifecycle hooks: `beforeStep`, `afterStep`, `onStepError` — optional, non-fatal
-- Named doc blocks (`:::guidance[name]:::`) with per-step `docs:` projection
-- `transform` step kind — deterministic JS expression for data reshaping
-- `block` template declarations — reusable step definitions expanded at parse time
-- `const` in frontmatter — shared values referenced as `const.key` anywhere
-- `matches` operator — regex branch conditions (`value matches "^feat/"`)
-- `skip_if` on steps — lightweight guard without a full branch step
-
-### Benchmarks added
-- `addresszen-automation` eval — -82% input tokens, both OpenAI and Cerebras
-- `benchmark_report.md` updated with all 4 tasks
-
-### Plans consolidated
-- `plans/ROADMAP.md` — single source of truth, replaces PLAN.md + FEATURES.md + ALPHA.md
-- `plans/PRD.md` — product vision, top-level executor, phase roadmap
-- `plans/ATTACK.md` — ordered execution plan for Wave 1 alpha gate
-
----
-
 ## Current State
 
-- 54 tests passing
-- All examples and eval skills validate clean
-- Runtime: `tool`, `llm`, `branch`, `transform`, `block` steps
-- CLI: `validate`, `run`, `inspect-run`, `import`
-- Built-in tools: `git.*`, `file.exists`, `util.*`
-- Tool registry: GitHub, Linear (output schema auto-derived)
+**74 tests passing. Published to npm as `runeflow@0.1.0`.**
 
 ---
 
-## Next Steps (Wave 1 — Alpha Gate)
+## What's Shipped (complete feature list)
 
-Pick up from item 4 in `plans/ATTACK.md`:
+### Runtime
+- Step kinds: `tool`, `llm`, `branch`, `transform`, `block`, `cli`
+- Control flow: `retry`, `fallback`, `fail`, `next`, `skip_if`
+- `const` in frontmatter — shared values as `const.key`
+- `matches` operator — regex branch conditions
+- Lifecycle hooks: `beforeStep`, `afterStep`, `onStepError`
+- Named doc blocks (`:::guidance[name]:::`) with per-step `docs:` projection
+- `{{ }}` interpolation in all string fields
+- Schema validation on all step inputs (registry-backed) and outputs
+- `halted_on_error` run status with `halted_step_id`
+- Input-hash caching with `cache=false` opt-out
+- JSON artifacts for every run and step
 
-### 4. State Management & Fault Tolerance (alpha blocker)
+### CLI
+- `validate`, `run`, `resume`, `inspect-run`, `import`
+- `tools list` / `tools inspect <name>`
+- `assemble` — renders a clean context file for a specific llm step (agent integration)
 
-Run artifacts already exist per step. What's missing:
+### Built-in tools
+- `git.current_branch`, `git.diff_summary`, `git.push_current_branch`
+- `git.log`, `git.tag_list`
+- `file.exists`, `file.read`, `file.write`
+- `util.complete`, `util.fail`
 
-- **`halted_on_error` run status** — when a step fails with no fallback, mark the run artifact `status: "halted_on_error"` instead of just `"failed"`. Includes the failed step id so resume knows where to restart.
-- **`runeflow resume <skill>`** CLI command — reads the most recent run artifact for the skill, skips all `success` steps (loading their cached outputs into state), retries from the `halted_on_error` step
-- **Input-hash caching** — before executing a step, hash its resolved inputs. If hash matches the previous run's step artifact, skip execution and load cached outputs. `cache: false` opt-out for steps with side effects.
+### Registry
+- Built-in registry loads from package root (not cwd) — works when installed via npm
+- User registry at `<project>/registry/tools/` merges on top — user entries win
+- Registry schemas: GitHub, Linear, gh CLI, npm, docker, kubectl, curl
+- Input validation at runtime against registry `inputSchema`
+- `getToolInputSchema` exported from `tool-registry.js`
 
-Implementation touches: `src/runtime.js` (halted_on_error status, hash computation), `src/cli.js` (resume command)
+### Default runtime
+- `createDefaultRuntime()` — handles cerebras, openai, anthropic out of the box
+- Exported from `runeflow` package
 
-### 5. `runeflow tools list` + `runeflow tools inspect <tool>` (alpha blocker)
-- Add metadata (name, description, inputSchema) to built-in tools in `src/builtins.js`
-- Add `tools list` and `tools inspect <name>` subcommands to `src/cli.js`
-- `tools list` prints all built-ins + registry tools with name and description
-- `tools inspect <name>` prints input schema, output schema, description
-- Without this, new users must read source code to know what tools exist
+### Assembler
+- `assembleRuneflow(definition, stepId, inputs, runtime, options)` — exported
+- Runs tool/transform pre-steps, resolves prompt, renders clean Markdown for agents
 
-### 6. Third example skill
-- Recommended: release notes drafting
-- Files: `examples/release-notes.runeflow.md` + `examples/release-notes-runtime.js`
-- Should use `git` built-ins + one `llm` step + `transform` to show the full model
-- Add `npm run eval:release-notes` script
+### Examples
+- `open-pr.runeflow.md` — PR prep
+- `review-draft.runeflow.md` — code review notes
+- `release-notes.runeflow.md` — release notes with transform + const
+- `block-demo.runeflow.md` — reusable block templates
+- `open-pr-gh.runeflow.md` — full end-to-end with `cli` step + `gh pr create`
 
-### 7. README rewrite
-- Structure: what it is → benchmark numbers → 5-minute quickstart → supported step kinds → CLI reference
-- Add `jsconfig.json` for JS type checking
-- Note: "runtime is JS, skill files are typed via the validator"
-- Add llm.js as an optional example runtime (`examples/llmjs-runtime.js`) showing multi-provider wiring
+### Infrastructure
+- Published: `npm install runeflow` / `npm install -g runeflow`
+- CI: `.github/workflows/ci.yml` — runs tests + validates examples on every push
+- Publish: `.github/workflows/publish.yml` — publishes on git tag push
+- LICENSE (MIT), CONTRIBUTING.md
 
 ---
 
-## Wave 2 (after alpha ships)
-- `cli` step kind — shell command via `child_process`
-- `human_input` step kind — pause for terminal input
-- Auth waterfall — env → .env → `~/.runeflow/credentials.json`
-- `runeflow assemble` — preprocessor command for agent integration
+## Todo List
 
-## Wave 3 (after Wave 2)
-- MCP server (`runeflow-mcp`)
-- `runeflow build` — planner LLM compiles English → runeflow block
-- Skill discovery convention
+### High priority (Wave 2 remaining)
+
+**`human_input` step kind**
+- Pauses execution, prompts terminal user, resumes with answer
+- Supports free text or constrained `choices: [...]`
+- State persisted before pause so `resume` works correctly
+- Touches: `src/runtime.js`, `src/validator.js`, `src/cli.js` (needs interactive stdin)
+- Useful for approval gates: `"Deploy to production? (yes/no)"`
+
+**Auth waterfall**
+- Credentials resolved: env vars → `.env` → `~/.runeflow/credentials.json`
+- Fail fast before execution with clear message: `Missing OPENAI_API_KEY for step 'draft'`
+- Provider map: `{ openai: "OPENAI_API_KEY", anthropic: "ANTHROPIC_API_KEY", cerebras: "CEREBRAS_API_KEY" }`
+- Touches: `src/default-runtime.js` (already reads env), `src/runtime.js` (pre-flight check)
+
+**`runeflow-registry` package** (separate npm package)
+- Schema + implementation travel together — no more split between registry JSON and user runtime.js
+- Structure: `providers/github/`, `providers/linear/`, `providers/slack/`, `providers/notion/`
+- Each provider exports `{ tools(config), schemas }`
+- Usage: `import { github } from "runeflow-registry"; tools: github({ token })`
+- Auth passed at construction time, not via env vars inside tools
+- See sketch in ROADMAP.md
+
+### Medium priority (Wave 3)
+
+**MCP server (`runeflow-mcp`)**
+- Exposes `runeflow_run` as an MCP tool
+- Any MCP-compatible agent (Claude Code, Cursor, Codex) can execute skills directly
+- Closes the loop on the token reduction story for agent integration
+
+**`runeflow build`**
+- Planner LLM compiles English skill description → runeflow block
+- `runeflow build "draft a PR from the current branch" --output draft-pr.runeflow.md`
+
+**Skill discovery convention**
+- Standard location: `.runeflow/skills/`
+- Convention in `AGENTS.md` so agents find and execute skills without explicit config
+
+### Low priority / future
+
+**`--force` flag on `run`** — bypass all caches for a fresh run
+**Parallel `tool` steps** — fan out N tool calls, join outputs
+**Better error messages** — suggest available block names, actual output fields
+**Skill composition / imports** — include sub-skills from other files
+**Native binary** — Rust/Go for zero-dependency distribution
 
 ---
 
-## Key Decisions Made
+## User-Provided Schemas
 
-- LLM never calls tools — runtime owns all tool execution, LLM produces structured JSON only
-- llm.js as optional example runtime, not a core dependency
-- JS runtime stays as-is, TypeScript noted in README
-- Alpha = public for feedback, not feature complete
-- Integration (MCP, agent preprocessor) is more valuable than standalone features long-term
+Two ways users can extend the registry today:
+
+**1. Project-level registry directory**
+
+Drop JSON schema files in `<project>/registry/tools/`. They merge on top of the built-in registry. User entries win on name collision.
+
+```
+my-project/
+└── registry/
+    └── tools/
+        ├── stripe.charge.json
+        └── sendgrid.send_email.json
+```
+
+Each file follows the same format as the built-in schemas:
+```json
+{
+  "name": "stripe.charge",
+  "description": "Create a Stripe charge.",
+  "tags": ["stripe", "payments"],
+  "inputSchema": { ... },
+  "outputSchema": { ... }
+}
+```
+
+**2. Programmatic `toolRegistry` option**
+
+Pass schemas inline when calling `runRuneflow` or `validateRuneflow`:
+
+```js
+import { runRuneflow } from "runeflow";
+
+await runRuneflow(definition, inputs, runtime, {
+  toolRegistry: [
+    {
+      name: "stripe.charge",
+      description: "Create a Stripe charge.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          amount: { type: "number" },
+          currency: { type: "string" },
+        },
+        required: ["amount", "currency"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          charge_id: { type: "string" },
+          status: { type: "string" },
+        },
+        required: ["charge_id", "status"],
+      },
+    },
+  ],
+});
+```
+
+The `toolRegistry` option accepts a Map, array, or plain object — same as `normalizeToolRegistry`.
 
 ---
 
@@ -95,14 +180,19 @@ Implementation touches: `src/runtime.js` (halted_on_error status, hash computati
 
 | File | Purpose |
 |---|---|
-| `src/runtime.js` | Execution engine |
+| `src/runtime.js` | Execution engine — step dispatch, caching, artifacts |
 | `src/parser.js` | Frontmatter + DSL parsing, doc blocks, const |
 | `src/expression.js` | Expression evaluation, matches, const paths |
 | `src/validator.js` | Static validation, reference checking |
 | `src/blocks.js` | Block template expansion |
-| `src/builtins.js` | Built-in tools (needs metadata for tools CLI) |
-| `src/cli.js` | CLI commands (needs tools list/inspect) |
-| `plans/PRD.md` | Product vision and phase roadmap |
-| `plans/ROADMAP.md` | Full roadmap, single source of truth |
-| `plans/ATTACK.md` | Ordered execution plan |
-| `benchmark_report.md` | All 4 benchmark results |
+| `src/builtins.js` | Built-in tool implementations |
+| `src/cli.js` | CLI commands |
+| `src/assembler.js` | Agent context assembly |
+| `src/default-runtime.js` | Default LLM runtime (cerebras/openai/anthropic) |
+| `src/tool-registry.js` | Registry loading — package root + user merge |
+| `registry/tools/` | Built-in tool schemas |
+| `examples/` | Reference skills and runtimes |
+| `eval/` | Benchmark harnesses |
+| `test/` | Behavior tests |
+| `plans/ROADMAP.md` | Full roadmap |
+| `.github/workflows/` | CI + publish automation |

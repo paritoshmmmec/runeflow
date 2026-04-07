@@ -1,0 +1,23 @@
+{
+  "name": "file.read",
+  "description": "Read a file's contents relative to the workflow cwd.",
+  "tags": ["builtin", "filesystem"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":     { "type": "string", "description": "File path relative to cwd or absolute." },
+      "encoding": { "type": "string", "description": "File encoding. Defaults to utf8." }
+    },
+    "required": ["path"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "content": { "type": "string" },
+      "path":    { "type": "string" }
+    },
+    "required": ["content", "path"],
+    "additionalProperties": false
+  }
+}

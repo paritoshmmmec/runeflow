@@ -1,0 +1,27 @@
+{
+  "name": "docker.build",
+  "description": "Build a Docker image from a Dockerfile.",
+  "tags": ["docker", "cli", "build"],
+  "cliCommand": "docker build",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "tag": { "type": "string", "description": "Image name and optional tag, e.g. myapp:latest." },
+      "context": { "type": "string", "description": "Build context path. Defaults to current directory." },
+      "file": { "type": "string", "description": "Path to Dockerfile. Defaults to ./Dockerfile." },
+      "build_arg": { "type": "string", "description": "Build argument in KEY=VALUE format." }
+    },
+    "required": ["tag"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "stdout": { "type": "string" },
+      "stderr": { "type": "string" },
+      "exit_code": { "type": "number" }
+    },
+    "required": ["stdout", "stderr", "exit_code"],
+    "additionalProperties": false
+  }
+}

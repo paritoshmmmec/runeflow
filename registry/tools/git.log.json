@@ -1,0 +1,37 @@
+{
+  "name": "git.log",
+  "description": "Return commit log between a base ref and HEAD.",
+  "tags": ["builtin", "git"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "base": { "type": "string", "description": "Base ref for range base...HEAD." },
+      "limit": { "type": "number", "description": "Maximum number of commits to return. Defaults to 50." }
+    },
+    "required": ["base"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "base": { "type": "string" },
+      "count": { "type": "number" },
+      "commits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "hash":    { "type": "string" },
+            "subject": { "type": "string" },
+            "author":  { "type": "string" },
+            "date":    { "type": "string" }
+          },
+          "required": ["hash", "subject", "author", "date"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["base", "count", "commits"],
+    "additionalProperties": false
+  }
+}

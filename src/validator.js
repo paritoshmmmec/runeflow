@@ -83,6 +83,10 @@ function getStepOutputSchema(step, toolRegistry) {
     return step.out ?? null;
   }
 
+  if (step.kind === "cli") {
+    return step.out ?? { stdout: "string", stderr: "string", exit_code: "number" };
+  }
+
   return null;
 }
 
@@ -196,7 +200,7 @@ export function validateSkill(definition, options = {}) {
 
     seenStepIds.add(step.id);
 
-    if (step.kind !== "tool" && step.kind !== "llm" && step.kind !== "branch" && step.kind !== "transform") {
+    if (step.kind !== "tool" && step.kind !== "llm" && step.kind !== "branch" && step.kind !== "transform" && step.kind !== "cli") {
       issues.push(`step '${step.id}' has unsupported kind '${step.kind}'`);
       continue;
     }
@@ -246,6 +250,12 @@ export function validateSkill(definition, options = {}) {
       }
       if (!isPlainObject(step.out) && !Array.isArray(step.out)) {
         issues.push(`step '${step.id}' must declare an out schema`);
+      }
+    }
+
+    if (step.kind === "cli") {
+      if (typeof step.command !== "string" || !step.command.trim()) {
+        issues.push(`step '${step.id}' must declare a command`);
       }
     }
 
@@ -322,6 +332,10 @@ export function validateSkill(definition, options = {}) {
 
     if (step.kind === "transform") {
       references.push(...collectReferences(step.input ?? {}, issues, `step '${step.id}' input`));
+    }
+
+    if (step.kind === "cli" && step.command) {
+      references.push(...collectReferences(step.command, issues, `step '${step.id}' command`));
     }
 
     if (step.failMessage) {

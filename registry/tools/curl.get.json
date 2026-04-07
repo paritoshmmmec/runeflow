@@ -1,0 +1,26 @@
+{
+  "name": "curl.get",
+  "description": "Make an HTTP GET request using curl.",
+  "tags": ["http", "cli", "network"],
+  "cliCommand": "curl",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": { "type": "string", "description": "URL to fetch." },
+      "header": { "type": "string", "description": "Optional header in 'Key: Value' format." },
+      "silent": { "type": "boolean", "description": "Suppress progress output. Defaults to true." }
+    },
+    "required": ["url"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "stdout": { "type": "string", "description": "Response body." },
+      "stderr": { "type": "string" },
+      "exit_code": { "type": "number" }
+    },
+    "required": ["stdout", "stderr", "exit_code"],
+    "additionalProperties": false
+  }
+}

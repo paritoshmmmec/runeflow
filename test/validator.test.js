@@ -369,3 +369,101 @@ output {
   assert.equal(validation.valid, false);
   assert.match(validation.issues.join("\n"), /unknown or forward step reference/);
 });
+
+test("validateRuneflow accepts a valid cli step", () => {
+  const parsed = parseRuneflow(`---
+name: cli-valid
+description: Valid cli step
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step run type=cli {
+  command: "echo done"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: steps.run.stdout }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("validateRuneflow rejects cli step missing command", () => {
+  const parsed = parseRuneflow(`---
+name: cli-no-command
+description: Missing command
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step run type=cli {
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: steps.run.stdout }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((i) => i.includes("must declare a command")));
+});
+
+test("validateRuneflow checks interpolated references in cli command", () => {
+  const parsed = parseRuneflow(`---
+name: cli-bad-ref
+description: Bad reference in command
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step run type=cli {
+  command: "echo {{ inputs.nonexistent }}"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: steps.run.stdout }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((i) => i.includes("nonexistent")));
+});

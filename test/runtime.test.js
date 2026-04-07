@@ -1402,3 +1402,147 @@ output {
   assert.equal(callCount, 2);
   assert.equal(run2.steps[0].cached, undefined);
 });
+
+test("cli step: executes shell command and captures stdout/stderr/exit_code", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cli-basic
+description: Basic cli step
+version: 0.1
+inputs: {}
+outputs:
+  message: string
+---
+
+\`\`\`runeflow
+step greet type=cli {
+  command: "echo hello-runeflow"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { message: steps.greet.stdout }
+  out: { message: string }
+}
+
+output {
+  message: steps.finish.message
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.match(run.outputs.message, /hello-runeflow/);
+  assert.equal(run.steps[0].outputs.exit_code, 0);
+});
+
+test("cli step: interpolates inputs and prior step outputs into command", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cli-interpolate
+description: cli interpolation
+version: 0.1
+inputs:
+  name: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step greet type=cli {
+  command: "echo hello-{{ inputs.name }}"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: steps.greet.stdout }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, { name: "world" }, {}, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.match(run.outputs.result, /hello-world/);
+});
+
+test("cli step: non-zero exit code halts run by default", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cli-fail
+description: cli failure
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step bad type=cli {
+  command: "exit 1"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir });
+
+  assert.equal(run.status, "halted_on_error");
+  assert.equal(run.halted_step_id, "bad");
+  assert.match(run.error.message, /exited with code/);
+});
+
+test("cli step: allow_failure=true captures non-zero exit without halting", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cli-allow-fail
+description: cli allow failure
+version: 0.1
+inputs: {}
+outputs:
+  code: number
+---
+
+\`\`\`runeflow
+step check type=cli {
+  command: "exit 2"
+  allow_failure: true
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { code: steps.check.exit_code }
+  out: { code: number }
+}
+
+output {
+  code: steps.finish.code
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.code, 2);
+});

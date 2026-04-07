@@ -1,0 +1,33 @@
+{
+  "name": "gh.pr_create",
+  "description": "Create a GitHub pull request using the gh CLI. Requires gh to be installed and authenticated.",
+  "tags": ["github", "cli", "pull-requests"],
+  "cliCommand": "gh pr create",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string", "description": "Pull request title." },
+      "body": { "type": "string", "description": "Pull request body." },
+      "base": { "type": "string", "description": "Base branch to merge into." },
+      "draft": { "type": "boolean", "description": "Open as a draft pull request." },
+      "label": { "type": "string", "description": "Comma-separated labels to apply." }
+    },
+    "required": ["title", "body"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "stdout": { "type": "string", "description": "URL of the created pull request." },
+      "stderr": { "type": "string" },
+      "exit_code": { "type": "number" }
+    },
+    "required": ["stdout", "stderr", "exit_code"],
+    "additionalProperties": false
+  },
+  "examples": [
+    {
+      "step": "step create_pr type=cli cache=false {\n  command: \"gh pr create --title '{{ steps.draft.title }}' --body '{{ steps.draft.body }}' --base main\"\n  out: { stdout: string, stderr: string, exit_code: number }\n}"
+    }
+  ]
+}

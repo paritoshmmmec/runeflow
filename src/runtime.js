@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
 import { validateShape } from "./schema.js";
-import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
+import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
 import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
 import { validateSkill } from "./validator.js";
 
@@ -164,6 +166,36 @@ function inferBranchOutput(conditionResult, target) {
   };
 }
 
+const execFileAsync = promisify(execFile);
+
+async function invokeCliStep(step, resolvedCommand, options) {
+  const cwd = options.cwd ?? process.cwd();
+  const timeout = step.timeout ?? 30_000;
+
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.platform === "win32" ? "cmd" : "sh",
+      process.platform === "win32" ? ["/c", resolvedCommand] : ["-c", resolvedCommand],
+      { cwd, timeout, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return {
+      stdout: stdout ?? "",
+      stderr: stderr ?? "",
+      exit_code: 0,
+    };
+  } catch (error) {
+    // execFile rejects on non-zero exit — capture it as a structured output
+    if (typeof error.code === "number") {
+      return {
+        stdout: error.stdout ?? "",
+        stderr: error.stderr ?? "",
+        exit_code: error.code,
+      };
+    }
+    throw new RuntimeError(`cli step '${step.id}' failed to execute: ${error.message}`);
+  }
+}
+
 export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   const resolvedDefinition = {
     ...definition,
@@ -304,6 +336,14 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       try {
         if (step.kind === "tool") {
           resolvedInput = resolveBindings(step.with ?? {}, state);
+          // Validate input against registry inputSchema if available
+          const toolInputSchema = getToolInputSchema(step.tool, toolRegistry);
+          if (toolInputSchema) {
+            const inputIssues = validateShape(resolvedInput, toolInputSchema, `steps.${step.id} with`);
+            if (inputIssues.length) {
+              throw new RuntimeError(`Tool input failed validation: ${inputIssues.join("; ")}`);
+            }
+          }
           finalOutputs = await invokeTool(step, resolvedInput, effectiveRuntime, state);
           const toolOutputSchema = step.out ?? getToolOutputSchema(step.tool, toolRegistry);
           const issues = validateShape(finalOutputs, toolOutputSchema, `steps.${step.id}`);
@@ -337,6 +377,25 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           const issues = validateShape(finalOutputs, step.out, `steps.${step.id}`);
           if (issues.length) {
             throw new RuntimeError(`Transform output failed validation: ${issues.join("; ")}`);
+          }
+        } else if (step.kind === "cli") {
+          const resolvedCommand = resolveBindings(step.command, state);
+          if (typeof resolvedCommand !== "string" || !resolvedCommand.trim()) {
+            throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
+          }
+          resolvedInput = { command: resolvedCommand };
+          finalOutputs = await invokeCliStep(step, resolvedCommand, options);
+          // Non-zero exit_code triggers failure unless the step opts out via out schema
+          if (finalOutputs.exit_code !== 0 && step.allow_failure !== true) {
+            throw new RuntimeError(
+              `cli step '${step.id}' exited with code ${finalOutputs.exit_code}.\n` +
+              `stderr: ${finalOutputs.stderr || "(empty)"}`,
+            );
+          }
+          const cliOutputSchema = step.out ?? { stdout: "string", stderr: "string", exit_code: "number" };
+          const issues = validateShape(finalOutputs, cliOutputSchema, `steps.${step.id}`);
+          if (issues.length) {
+            throw new RuntimeError(`cli output failed validation: ${issues.join("; ")}`);
           }
         } else {
           throw new RuntimeError(`Unsupported step kind '${step.kind}'.`);

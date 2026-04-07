@@ -1,0 +1,24 @@
+{
+  "name": "file.write",
+  "description": "Write content to a file relative to the workflow cwd. Creates parent directories if needed.",
+  "tags": ["builtin", "filesystem"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path":    { "type": "string", "description": "File path relative to cwd or absolute." },
+      "content": { "type": "string", "description": "Content to write." },
+      "append":  { "type": "boolean", "description": "Append to file instead of overwriting. Defaults to false." }
+    },
+    "required": ["path", "content"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "path":    { "type": "string" },
+      "written": { "type": "boolean" }
+    },
+    "required": ["path", "written"],
+    "additionalProperties": false
+  }
+}

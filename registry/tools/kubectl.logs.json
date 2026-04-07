@@ -1,0 +1,27 @@
+{
+  "name": "kubectl.logs",
+  "description": "Fetch logs from a Kubernetes pod.",
+  "tags": ["kubernetes", "cli", "ops"],
+  "cliCommand": "kubectl logs",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "pod": { "type": "string", "description": "Pod name or resource selector, e.g. pod/api-server." },
+      "tail": { "type": "number", "description": "Number of lines to tail." },
+      "container": { "type": "string", "description": "Container name when pod has multiple containers." },
+      "namespace": { "type": "string", "description": "Kubernetes namespace." }
+    },
+    "required": ["pod"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "stdout": { "type": "string", "description": "Log output." },
+      "stderr": { "type": "string" },
+      "exit_code": { "type": "number" }
+    },
+    "required": ["stdout", "stderr", "exit_code"],
+    "additionalProperties": false
+  }
+}

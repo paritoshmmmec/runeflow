@@ -1,0 +1,26 @@
+{
+  "name": "gh.pr_list",
+  "description": "List pull requests in the current repository using the gh CLI.",
+  "tags": ["github", "cli", "pull-requests"],
+  "cliCommand": "gh pr list",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "state": { "type": "string", "description": "Filter by state: open, closed, merged, or all." },
+      "limit": { "type": "number", "description": "Maximum number of results." },
+      "base": { "type": "string", "description": "Filter by base branch." },
+      "json": { "type": "string", "description": "Comma-separated fields to output as JSON." }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "stdout": { "type": "string" },
+      "stderr": { "type": "string" },
+      "exit_code": { "type": "number" }
+    },
+    "required": ["stdout", "stderr", "exit_code"],
+    "additionalProperties": false
+  }
+}

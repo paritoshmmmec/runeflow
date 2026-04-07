@@ -1,0 +1,21 @@
+{
+  "name": "git.tag_list",
+  "description": "List git tags sorted by version, newest first.",
+  "tags": ["builtin", "git"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "pattern": { "type": "string", "description": "Optional glob pattern to filter tags, e.g. 'v*'." }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "tags":   { "type": "array", "items": { "type": "string" } },
+      "latest": { "type": "string" }
+    },
+    "required": ["tags"],
+    "additionalProperties": false
+  }
+}
