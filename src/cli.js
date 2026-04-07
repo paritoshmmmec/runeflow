@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { assembleRuneflow } from "./assembler.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { parseRuneflow } from "./parser.js";
 import { runRuneflow } from "./runtime.js";
@@ -117,6 +118,7 @@ export async function runCli(argv) {
   runeflow validate <file>
   runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
+  runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
   runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow import <file> [--output converted.runeflow.md]
   runeflow tools list
@@ -184,6 +186,28 @@ export async function runCli(argv) {
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {
       process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "assemble") {
+    const target = positional[0];
+    if (!target) throw new Error("Usage: runeflow assemble <file> --step <step-id> --input '{}'");
+    const stepId = options.step;
+    if (!stepId) throw new Error("--step <step-id> is required for assemble");
+
+    const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
+    const definition = parseRuneflow(source, { sourcePath: target });
+    const runtime = await loadRuntime(options.runtime);
+    const input = await loadInput(options.input);
+
+    const assembled = await assembleRuneflow(definition, stepId, input, runtime);
+
+    if (options.output) {
+      await fs.writeFile(path.resolve(process.cwd(), options.output), assembled);
+      console.error(`Written to ${options.output}`);
+    } else {
+      console.log(assembled);
     }
     return;
   }

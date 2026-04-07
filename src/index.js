@@ -1,3 +1,4 @@
+export { assembleRuneflow, assembleSkill } from "./assembler.js";
 export { resolveWorkflowBlocks } from "./blocks.js";
 export { createDefaultRuntime } from "./default-runtime.js";
 export { importMarkdownRuneflow, importMarkdownSkill } from "./importer.js";
