@@ -29,7 +29,25 @@
     "eval:release-notes": "node --env-file=.env ./eval/release-notes.js"
   },
   "dependencies": {
+    "ai": "^6.0.149",
     "tiktoken": "^1.0.22",
-    "yaml": "^2.8.1"
+    "yaml": "^2.8.1",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "@ai-sdk/anthropic": ">=1.0.0",
+    "@ai-sdk/cerebras": ">=1.0.0",
+    "@ai-sdk/google": ">=1.0.0",
+    "@ai-sdk/groq": ">=1.0.0",
+    "@ai-sdk/mistral": ">=1.0.0",
+    "@ai-sdk/openai": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/anthropic": { "optional": true },
+    "@ai-sdk/cerebras": { "optional": true },
+    "@ai-sdk/google": { "optional": true },
+    "@ai-sdk/groq": { "optional": true },
+    "@ai-sdk/mistral": { "optional": true },
+    "@ai-sdk/openai": { "optional": true }
   }
 }

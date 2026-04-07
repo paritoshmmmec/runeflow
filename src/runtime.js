@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveWorkflowBlocks } from "./blocks.js";
+import { checkAuth } from "./auth.js";
 import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
@@ -209,6 +210,15 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
 
   const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
   const effectiveRuntime = createRuntime(runtime, options);
+
+  // Auth pre-flight — only check providers not already handled by the runtime
+  // Skip entirely if runtime provides its own llms handlers
+  if (options.checkAuth !== false && !runtime.llms) {
+    const authErrors = checkAuth(resolvedDefinition, options);
+    if (authErrors.length) {
+      throw new ValidationError("Auth pre-flight failed.", authErrors);
+    }
+  }
   const run = {
     run_id: createRunId(),
     runeflow: {

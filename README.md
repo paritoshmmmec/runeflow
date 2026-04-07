@@ -54,19 +54,24 @@ Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 npm install -g runeflow
 ```
 
-**Step 2 — Add your API key**
+**Step 2 — Install a provider package and add your API key**
 
-Runeflow works with Cerebras, OpenAI, or Anthropic. Pick one and add the key to a `.env` file:
+Runeflow uses the [Vercel AI SDK](https://sdk.vercel.ai) under the hood. Install the package for your provider:
 
 ```bash
-# Cerebras (free tier at cloud.cerebras.ai)
+# pick one (or more)
+npm install @ai-sdk/cerebras    # CEREBRAS_API_KEY  — free tier at cloud.cerebras.ai
+npm install @ai-sdk/openai      # OPENAI_API_KEY
+npm install @ai-sdk/anthropic   # ANTHROPIC_API_KEY
+npm install @ai-sdk/groq        # GROQ_API_KEY      — free tier at console.groq.com
+npm install @ai-sdk/mistral     # MISTRAL_API_KEY
+npm install @ai-sdk/google      # GOOGLE_GENERATIVE_AI_API_KEY
+```
+
+Add your key to a `.env` file:
+
+```bash
 echo "CEREBRAS_API_KEY=your-key-here" > .env
-
-# or OpenAI
-echo "OPENAI_API_KEY=your-key-here" > .env
-
-# or Anthropic
-echo "ANTHROPIC_API_KEY=your-key-here" > .env
 ```
 
 **Step 3 — Create a skill file**
@@ -223,8 +228,10 @@ output {
 |---|---|
 | `tool` | Calls a registered tool, validates output against `out` schema |
 | `llm` | Calls an LLM handler, validates output against `schema` |
+| `cli` | Runs a shell command, captures `stdout`, `stderr`, `exit_code` |
 | `transform` | Runs a JS expression over resolved `input`, validates against `out` |
 | `branch` | Evaluates an expression, routes to `then` or `else` step |
+| `block` | Instantiates a defined `block` template with overriding properties |
 
 Control flow: `retry=N`, `fallback=<step>`, `next=<step>`, `skip_if: <expr>`, terminal `fail`.
 
@@ -268,6 +275,30 @@ branch check {
 }
 ```
 
+### cli
+
+```runeflow
+step create_pr type=cli cache=false {
+  command: "gh pr create --title '{{ steps.draft.title }}' --base {{ inputs.base_branch }}"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+```
+
+Non-zero exit code halts the run by default. Add `allow_failure: true` to capture it instead.
+
+### block
+
+```runeflow
+block greet_template type=llm {
+  prompt: "Reply with a single short greeting for {{ inputs.name }}."
+  schema: { greeting: string }
+}
+
+step greet type=block {
+  block: greet_template
+}
+```
+
 ---
 
 ## 🔤 Expressions
@@ -293,7 +324,11 @@ String fields support `{{ expr }}` interpolation. Bare fields support expression
 | `git.current_branch` | Current branch name |
 | `git.diff_summary` | Diff stat between base ref and HEAD |
 | `git.push_current_branch` | Push current branch to upstream |
+| `git.log` | Commit log between a base ref and HEAD |
+| `git.tag_list` | List tags sorted by version, newest first |
 | `file.exists` | Check if a path exists |
+| `file.read` | Read a file's contents |
+| `file.write` | Write content to a file (creates dirs if needed) |
 | `util.complete` | Pass-through — returns its input as output |
 | `util.fail` | Return a structured failure message |
 
@@ -313,6 +348,7 @@ runeflow tools inspect git.diff_summary
 runeflow validate <file>
 runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs]
 runeflow resume <file> [--runtime ./runtime.js]
+runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
 runeflow inspect-run <run-id>
 runeflow import <file> [--output converted.runeflow.md]
 runeflow tools list
@@ -321,20 +357,32 @@ runeflow tools inspect <tool-name>
 
 `resume` reads the most recent `halted_on_error` run, replays completed steps from cache, and retries from the failure point.
 
+`assemble` runs all tool/transform steps before a target `llm` step, resolves the prompt with real values, and writes a clean Markdown context file for an agent (Claude Code, Codex, Cursor) to load instead of the raw skill.
+
 ---
 
 ## ✍️ Writing a Runtime
 
-The default runtime handles Cerebras, OpenAI, and Anthropic with zero config:
+The default runtime is powered by the [Vercel AI SDK](https://sdk.vercel.ai) and supports 6 providers out of the box. Install the packages for the providers you need, then use `createDefaultRuntime()`:
 
 ```js
+// runtime.js
 import { createDefaultRuntime } from "runeflow";
 export default createDefaultRuntime();
 ```
 
-Set the matching env var for your provider: `CEREBRAS_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`.
+| Provider | Package | Key |
+|---|---|---|
+| `cerebras` | `@ai-sdk/cerebras` | `CEREBRAS_API_KEY` |
+| `openai` | `@ai-sdk/openai` | `OPENAI_API_KEY` |
+| `anthropic` | `@ai-sdk/anthropic` | `ANTHROPIC_API_KEY` |
+| `groq` | `@ai-sdk/groq` | `GROQ_API_KEY` |
+| `mistral` | `@ai-sdk/mistral` | `MISTRAL_API_KEY` |
+| `google` | `@ai-sdk/google` | `GOOGLE_GENERATIVE_AI_API_KEY` |
 
-For custom behavior, extend it:
+Keys are resolved automatically via the auth waterfall: `process.env` → `.env` file → `~/.runeflow/credentials.json`. A clear error is thrown before execution if a key is missing.
+
+To add a custom provider or override behavior, extend the base runtime:
 
 ```js
 import { createDefaultRuntime } from "runeflow";
@@ -345,8 +393,8 @@ export default {
   ...base,
   llms: {
     ...base.llms,
-    // add a provider or override an existing one
-    myProvider: async ({ llm, prompt, input, schema, docs }) => {
+    // add any provider the AI SDK supports, or a fully custom handler
+    ollama: async ({ llm, prompt, input, schema, docs }) => {
       // call your LLM, return an object matching schema
       return { title: "..." };
     },
@@ -359,8 +407,6 @@ export default {
 };
 ```
 
-See [`examples/open-pr-runtime.js`](./examples/open-pr-runtime.js) for a working custom runtime.
-
 ---
 
 ## 📦 Examples
@@ -368,13 +414,58 @@ See [`examples/open-pr-runtime.js`](./examples/open-pr-runtime.js) for a working
 | File | What it shows |
 |---|---|
 | [`examples/open-pr.runeflow.md`](./examples/open-pr.runeflow.md) | PR prep — tool steps + LLM |
+| [`examples/open-pr-gh.runeflow.md`](./examples/open-pr-gh.runeflow.md) | Full PR open — `cli` step with `gh pr create` |
 | [`examples/review-draft.runeflow.md`](./examples/review-draft.runeflow.md) | Code review notes — step-level LLM override |
 | [`examples/release-notes.runeflow.md`](./examples/release-notes.runeflow.md) | Release notes — `transform` + `const` + LLM |
 | [`examples/block-demo.runeflow.md`](./examples/block-demo.runeflow.md) | Reusable block templates |
 
 ---
 
-## 🗂️ Run Artifacts
+## 🔌 Extending the Tool Registry
+
+The built-in registry ships with the package. You can add your own tool schemas two ways:
+
+**Project-level directory** — drop JSON files in `<project>/registry/tools/`. They merge on top of the built-in registry automatically:
+
+```json
+{
+  "name": "stripe.charge",
+  "description": "Create a Stripe charge.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "amount": { "type": "number" },
+      "currency": { "type": "string" }
+    },
+    "required": ["amount", "currency"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": { "charge_id": { "type": "string" } },
+    "required": ["charge_id"]
+  }
+}
+```
+
+**Programmatic** — pass `toolRegistry` to `runRuneflow` or `validateRuneflow`:
+
+```js
+import { runRuneflow } from "runeflow";
+
+await runRuneflow(definition, inputs, runtime, {
+  toolRegistry: [
+    {
+      name: "stripe.charge",
+      inputSchema: { ... },
+      outputSchema: { ... },
+    },
+  ],
+});
+```
+
+The runtime validates tool inputs against `inputSchema` and outputs against `outputSchema` automatically.
+
+---
 
 Every run writes `.runeflow-runs/<run_id>.json` and per-step artifacts. Includes inputs, outputs, status, timing, and errors.
 
@@ -409,8 +500,8 @@ step push type=tool cache=false {
 
 | Phase | Status | What |
 |---|---|---|
-| Alpha | ✅ now | `tool`, `llm`, `transform`, `branch`, `block`, `resume`, caching, tools CLI |
-| v0.2 | 🔜 | `cli` step kind, `human_input` step, auth waterfall, `runeflow assemble` |
+| v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble` |
+| v0.2 | 🔜 next | `human_input` step, auth waterfall, `runeflow-registry` package |
 | v0.3 | 📅 planned | MCP server, `runeflow build` (LLM → skill compiler), agent integration |
 
 ---

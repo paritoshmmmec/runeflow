@@ -78,14 +78,6 @@ step confirm type=human_input {
 - State persisted before pause so `resume` works
 - `--non-interactive` flag skips with default answer in CI
 
-### Auth waterfall
-Credentials resolved in order: env vars → `.env` → `~/.runeflow/credentials.json`
-
-Fail fast before execution:
-```
-Missing OPENAI_API_KEY for step 'draft'. Export it or add it to your .env file.
-```
-
 ### `runeflow-registry` package
 
 A separate npm package where schema + implementation travel together.
@@ -121,8 +113,32 @@ runeflow-registry/
 
 Each provider is opt-in. Auth passed at construction, not via env vars inside tools.
 
+### Parallel tool steps
+Fan out N tool calls, join outputs. Constrained to `tool` steps only.
+
+```runeflow
+parallel gather {
+  steps: [gather_slack, gather_drive, gather_email]
+  out: { results: [any] }
+}
+```
+
+Cuts latency on multi-source workflows (3p-updates, incident summaries) from sequential to concurrent.
+
 ### `--force` flag on `run`
 Bypass all caches: `runeflow run skill.md --force`
+
+### `runeflow init`
+Scaffold a new skill interactively. Asks what you want to build, generates the `.runeflow.md` and `runtime.js`.
+
+```bash
+runeflow init
+# → What does this skill do? Draft a PR from the current branch
+# → Which provider? cerebras
+# → Writes: draft-pr.runeflow.md + runtime.js
+```
+
+Lowers the barrier to entry — new users get a working skill in under 2 minutes.
 
 ---
 
@@ -141,6 +157,49 @@ runeflow build "draft a PR from the current branch" --output draft-pr.runeflow.m
 ### Skill discovery convention
 Standard location: `.runeflow/skills/` + convention in `AGENTS.md`.
 Agents find and execute skills without explicit configuration.
+
+### `runeflow watch`
+Run a skill on a schedule or file change. Turns skills into background automations.
+
+```bash
+runeflow watch ./standup.runeflow.md --cron "0 9 * * 1-5"
+runeflow watch ./lint-check.runeflow.md --on-change "src/**/*.js"
+```
+
+---
+
+## Wave 4 — Scale & DX (v0.4)
+
+### Skill composition / imports
+One skill calling another, or sharing block libraries across files.
+
+```runeflow
+import blocks from "./shared/pr-blocks.runeflow.md"
+
+step draft type=block {
+  block: blocks.draft_pr_template
+}
+```
+
+Enables team-scale skill libraries. Artifact traces show where imported content came from.
+
+### `runeflow test`
+Test harness for skills. Run with fixture inputs, assert on outputs, mock LLM responses.
+
+```bash
+runeflow test ./draft-pr.runeflow.md --fixture ./tests/draft-pr.fixture.json
+```
+
+Makes skills maintainable — catch regressions before running for real.
+
+### TypeScript types
+Add `types/index.d.ts` with full type coverage for `runRuneflow`, `createDefaultRuntime`, `assembleRuneflow`, etc. Zero runtime cost, full IDE autocomplete.
+
+### Observability
+Structured telemetry via OpenTelemetry. `--telemetry` flag emits spans for each step — plugs into Datadog, Honeycomb, Grafana without custom hooks.
+
+### Skill versioning + migration
+`runeflow migrate` updates skill syntax when the DSL changes. Makes upgrades safe across teams.
 
 ---
 
