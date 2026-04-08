@@ -412,16 +412,18 @@ export async function runCli(argv) {
     }, null, 2));
 
     await new Promise((resolve) => {
-      const cleanup = () => {
+      const cleanup = async () => {
         shuttingDown = true;
-        for (const close of resources) {
-          close();
-        }
+        await Promise.all(resources.map((close) => close()));
         resolve();
       };
 
-      process.once("SIGINT", cleanup);
-      process.once("SIGTERM", cleanup);
+      process.once("SIGINT", () => {
+        void cleanup();
+      });
+      process.once("SIGTERM", () => {
+        void cleanup();
+      });
     });
 
     return;

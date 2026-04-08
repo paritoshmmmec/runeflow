@@ -14,6 +14,11 @@ import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js"
 import { validateSkill } from "./validator.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
+const DEFAULT_PARALLEL_OUTPUT_SCHEMA = {
+  results: ["any"],
+  by_step: "object",
+  step_ids: ["string"],
+};
 
 function createRunId() {
   const now = new Date();
@@ -633,6 +638,7 @@ async function executeParallelStep({
     };
   }
 
+  const startedAt = new Date().toISOString();
   const childResults = await Promise.all(childSteps.map((childStep) => executeStep({
     definition,
     step: childStep,
@@ -651,7 +657,6 @@ async function executeParallelStep({
     }
   }
 
-  const startedAt = new Date().toISOString();
   const childStepRuns = childResults.map((result) => result.stepRun);
   run.steps.push(...childStepRuns);
 
@@ -682,7 +687,7 @@ async function executeParallelStep({
   } else {
     const issues = validateShape(
       finalOutputs,
-      step.out ?? { results: ["any"], step_ids: ["string"] },
+      step.out ?? DEFAULT_PARALLEL_OUTPUT_SCHEMA,
       `steps.${step.id}`,
     );
 

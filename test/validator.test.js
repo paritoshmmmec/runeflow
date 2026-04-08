@@ -477,12 +477,12 @@ inputs: {}
 outputs:
   results:
     - any
+  first: string
 ---
 
 \`\`\`runeflow
 parallel gather {
   steps: [fetch_one, fetch_two]
-  out: { results: [any] }
 }
 
 step fetch_one type=tool {
@@ -497,6 +497,7 @@ step fetch_two type=tool {
 
 output {
   results: steps.gather.results
+  first: steps.gather.by_step.fetch_one.value
 }
 \`\`\`
 `);

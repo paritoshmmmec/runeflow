@@ -1652,6 +1652,14 @@ output {
     first: "one",
     results: [{ value: "one" }, { value: "two" }],
   });
+  assert.deepEqual(run.steps[2].outputs.by_step, {
+    fetch_one: { value: "one" },
+    fetch_two: { value: "two" },
+  });
+  assert.ok(
+    Date.parse(run.steps[2].started_at) <= Date.parse(run.steps[0].finished_at),
+    "parallel parent should start before children finish",
+  );
   assert.ok(elapsedMs < 110, `expected parallel execution, got ${elapsedMs}ms`);
 });
 

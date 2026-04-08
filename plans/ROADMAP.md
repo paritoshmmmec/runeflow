@@ -94,6 +94,14 @@ Planner LLM compiles English → runeflow block.
 runeflow build "draft a PR from the current branch" --output draft-pr.runeflow.md
 ```
 
+### Streaming terminal output
+Add a `--stream` mode for `runeflow run` / `runeflow resume` so users can watch execution live instead of waiting for the final run artifact.
+
+- Stream step lifecycle events (`starting`, `finished`, `failed`, `halted`)
+- Stream `cli` stdout/stderr live by switching buffered execution to a streaming process path
+- Stream partial `llm` output when the runtime/provider supports chunked responses
+- Preserve the final JSON artifact behavior so streaming is additive, not a separate execution mode
+
 ### Skill discovery convention
 Standard location: `.runeflow/skills/` + convention in `AGENTS.md`.
 Agents find and execute skills without explicit configuration.

@@ -63,16 +63,42 @@ function collectReferences(value, issues, location) {
   return references;
 }
 
-function getStepOutputSchema(step, toolRegistry) {
+function getParallelOutputSchema(step, workflow, stepIndex, toolRegistry) {
+  if (step.out) {
+    return step.out;
+  }
+
+  const byStep = {};
+  if (workflow && stepIndex && Array.isArray(step.steps)) {
+    for (const childId of step.steps) {
+      const childIndex = stepIndex.get(childId);
+      if (childIndex === undefined) {
+        continue;
+      }
+
+      const childStep = workflow.steps[childIndex];
+      if (!childStep) {
+        continue;
+      }
+
+      byStep[childId] = getStepOutputSchema(childStep, toolRegistry, workflow, stepIndex) ?? "any";
+    }
+  }
+
+  return {
+    results: ["any"],
+    by_step: byStep,
+    step_ids: ["string"],
+  };
+}
+
+function getStepOutputSchema(step, toolRegistry, workflow = null, stepIndex = null) {
   if (step.kind === "tool") {
     return step.out ?? getToolOutputSchema(step.tool, toolRegistry);
   }
 
   if (step.kind === "parallel") {
-    return step.out ?? {
-      results: ["any"],
-      step_ids: ["string"],
-    };
+    return getParallelOutputSchema(step, workflow, stepIndex, toolRegistry);
   }
 
   if (step.kind === "llm") {
@@ -406,7 +432,7 @@ export function validateSkill(definition, options = {}) {
 
   for (const step of workflow.steps) {
     const currentIndex = stepIndex.get(step.id);
-    const schema = getStepOutputSchema(step, toolRegistry);
+    const schema = getStepOutputSchema(step, toolRegistry, workflow, stepIndex);
 
     const targetPairs = [];
 
