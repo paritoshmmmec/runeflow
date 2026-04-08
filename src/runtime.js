@@ -7,10 +7,10 @@ import { resolveWorkflowBlocks } from "./blocks.js";
 import { checkAuth } from "./auth.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
-import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
+import { closeRuntimePlugins, createRuntimeEnvironment, createMcpClientPlugin, createMcpHttpClientPlugin, createComposioClientPlugin } from "./runtime-plugins.js";
 import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
-import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
+import { deepClone, ensureDir, isPlainObject, serializeError, deepExpandEnvVars } from "./utils.js";
 import { validateSkill } from "./validator.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
@@ -95,6 +95,49 @@ function projectLlmContext(definition, step) {
 
 function createRuntime(runtime = {}, options = {}) {
   return createRuntimeEnvironment(runtime, options);
+}
+
+async function buildFrontmatterPlugins(definition, options = {}) {
+  const plugins = [];
+  const { mcp_servers, composio } = definition.metadata ?? {};
+
+  if (isPlainObject(mcp_servers)) {
+    for (const [serverName, rawConfig] of Object.entries(mcp_servers)) {
+      const config = deepExpandEnvVars(rawConfig);
+      if (config.url) {
+        plugins.push(await createMcpHttpClientPlugin({
+          serverName,
+          url: config.url,
+          headers: config.headers,
+          idleTimeoutMs: config.idleTimeoutMs,
+        }));
+      } else {
+        plugins.push(await createMcpClientPlugin({
+          serverName,
+          command: config.command,
+          args: config.args ?? [],
+          env: { ...process.env, ...(config.env ?? {}) },
+          cwd: config.cwd ?? options.cwd,
+          idleTimeoutMs: config.idleTimeoutMs,
+        }));
+      }
+    }
+  }
+
+  if (isPlainObject(composio)) {
+    const cfg = deepExpandEnvVars(composio);
+    plugins.push(await createComposioClientPlugin({
+      tools: cfg.tools,
+      toolkits: cfg.toolkits,
+      executeDefaults: {
+        userId: cfg.entity_id ?? cfg.user_id,
+        connectedAccountId: cfg.connected_account_id,
+      },
+      cwd: options.cwd,
+    }));
+  }
+
+  return plugins;
 }
 
 function resolveLlmConfig(definition, step) {
@@ -774,7 +817,14 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     ...definition,
     workflow: resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }),
   };
-  const effectiveRuntime = createRuntime(runtime, options);
+
+  // Build plugins declared in skill frontmatter (mcp_servers, composio)
+  const frontmatterPlugins = await buildFrontmatterPlugins(resolvedDefinition, options);
+  const mergedRuntime = frontmatterPlugins.length > 0
+    ? { ...runtime, plugins: [...(runtime.plugins ?? []), ...frontmatterPlugins] }
+    : runtime;
+
+  const effectiveRuntime = createRuntime(mergedRuntime, options);
   try {
     const toolRegistry = loadToolRegistry({
       ...options,

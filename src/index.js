@@ -9,6 +9,7 @@ export {
   closeRuntimePlugins,
   createComposioClientPlugin,
   createMcpClientPlugin,
+  createMcpHttpClientPlugin,
   createComposioToolPlugin,
   createMcpToolPlugin,
   createRuntimeEnvironment,

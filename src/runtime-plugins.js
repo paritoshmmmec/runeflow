@@ -4,6 +4,7 @@ import { mergeToolRegistries, normalizeToolRegistry } from "./tool-registry.js";
 import { isPlainObject } from "./utils.js";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 export const ADAPTER_TOOL_RESULT_SCHEMA = {
   content: ["any"],
@@ -32,7 +33,11 @@ const SUPPORTED_JSON_SCHEMA_KEYS = new Set([
   "description",
 ]);
 
-function toSupportedSchema(schema) {
+const DROPPED_JSON_SCHEMA_KEYS = new Set([
+  "enum", "anyOf", "allOf", "oneOf", "not", "$ref", "const",
+]);
+
+function toSupportedSchema(schema, _path = "schema") {
   if (schema === null || schema === undefined) {
     return schema;
   }
@@ -42,7 +47,7 @@ function toSupportedSchema(schema) {
   }
 
   if (Array.isArray(schema)) {
-    return schema.map((item) => toSupportedSchema(item));
+    return schema.map((item) => toSupportedSchema(item, _path));
   }
 
   if (!isPlainObject(schema)) {
@@ -52,19 +57,26 @@ function toSupportedSchema(schema) {
   const result = {};
 
   for (const [key, value] of Object.entries(schema)) {
+    if (DROPPED_JSON_SCHEMA_KEYS.has(key)) {
+      if (process.env.RUNEFLOW_DEBUG) {
+        process.stderr.write(`[runeflow] toSupportedSchema: dropping unsupported key '${key}' at ${_path}\n`);
+      }
+      continue;
+    }
+
     if (!SUPPORTED_JSON_SCHEMA_KEYS.has(key)) {
       continue;
     }
 
     if (key === "properties" && isPlainObject(value)) {
       result.properties = Object.fromEntries(
-        Object.entries(value).map(([childKey, childValue]) => [childKey, toSupportedSchema(childValue)]),
+        Object.entries(value).map(([childKey, childValue]) => [childKey, toSupportedSchema(childValue, `${_path}.${childKey}`)]),
       );
       continue;
     }
 
     if (key === "items") {
-      result.items = toSupportedSchema(value);
+      result.items = toSupportedSchema(value, `${_path}[]`);
       continue;
     }
 
@@ -255,7 +267,9 @@ function createMcpClient(clientInfo = { name: "runeflow", version: "0.1.0" }) {
   return new Client(clientInfo);
 }
 
-function createManagedMcpSession(server, options = {}) {
+// Shared session manager — accepts a buildTransport factory so stdio and HTTP
+// can reuse the same idle-timeout / ref-counting logic.
+function createManagedMcpSession(server, options = {}, buildTransport) {
   const idleTimeoutMs = options.idleTimeoutMs;
   let client = null;
   let transport = null;
@@ -316,13 +330,7 @@ function createManagedMcpSession(server, options = {}) {
     }
 
     const nextClient = createMcpClient(server.clientInfo);
-    const nextTransport = new StdioClientTransport({
-      command: server.command,
-      args: server.args,
-      env: server.env,
-      cwd: server.cwd,
-      stderr: server.stderr,
-    });
+    const nextTransport = buildTransport(server);
 
     connectPromise = nextClient.connect(nextTransport)
       .then(() => {
@@ -360,6 +368,23 @@ function createManagedMcpSession(server, options = {}) {
   };
 }
 
+function buildStdioTransport(server) {
+  return new StdioClientTransport({
+    command: server.command,
+    args: server.args,
+    env: server.env,
+    cwd: server.cwd,
+    stderr: server.stderr,
+  });
+}
+
+function buildHttpTransport(server) {
+  return new StreamableHTTPClientTransport(
+    new URL(server.url),
+    { requestInit: { headers: server.headers ?? {} } },
+  );
+}
+
 export async function createMcpClientPlugin({
   serverName,
   command,
@@ -389,7 +414,7 @@ export async function createMcpClientPlugin({
     clientInfo,
   };
 
-  const session = createManagedMcpSession(server, { idleTimeoutMs });
+  const session = createManagedMcpSession(server, { idleTimeoutMs }, buildStdioTransport);
 
   const tools = await session.useClient(async (client) => {
     const result = await client.listTools();
@@ -410,6 +435,50 @@ export async function createMcpClientPlugin({
         name,
         arguments: input,
       }),
+    ),
+  });
+
+  return {
+    ...plugin,
+    close: session.close,
+  };
+}
+
+export async function createMcpHttpClientPlugin({
+  serverName,
+  url,
+  headers,
+  prefix = "mcp",
+  clientInfo,
+  idleTimeoutMs,
+}) {
+  if (typeof serverName !== "string" || !serverName.trim()) {
+    throw new Error("createMcpHttpClientPlugin requires a non-empty serverName");
+  }
+
+  if (typeof url !== "string" || !url.trim()) {
+    throw new Error("createMcpHttpClientPlugin requires a url");
+  }
+
+  const server = { serverName, url, headers, clientInfo };
+  const session = createManagedMcpSession(server, { idleTimeoutMs }, buildHttpTransport);
+
+  const tools = await session.useClient(async (client) => {
+    const result = await client.listTools();
+    return result.tools ?? [];
+  });
+
+  const plugin = createMcpToolPlugin({
+    serverName,
+    prefix,
+    tools: tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema ?? tool.structuredOutputSchema ?? undefined,
+    })),
+    callTool: async ({ name, input }) => session.useClient(
+      async (client) => client.callTool({ name, arguments: input }),
     ),
   });
 
@@ -483,7 +552,8 @@ function normalizeComposioToolName(sourceName, toolkitSlug) {
     return `${trimmedSourceName.slice(0, firstUnderscore).toLowerCase()}.${trimmedSourceName.slice(firstUnderscore + 1).toLowerCase()}`;
   }
 
-  return trimmedSourceName.toLowerCase();
+  // No underscore — always namespace under composio. to avoid collisions with builtins
+  return `composio.${trimmedSourceName.toLowerCase()}`;
 }
 
 function mapComposioRawTool(tool, index) {

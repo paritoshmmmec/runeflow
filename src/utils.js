@@ -66,3 +66,26 @@ export function getByPath(value, segments) {
 
   return { found: true, value: current };
 }
+
+/**
+ * Expand ${VAR} references in a string using process.env.
+ * Non-string values are returned as-is.
+ */
+export function expandEnvVars(value) {
+  if (typeof value !== "string") return value;
+  return value.replace(/\$\{([^}]+)\}/g, (_, key) => process.env[key] ?? "");
+}
+
+/**
+ * Recursively walk a value and expand ${VAR} in all string leaves.
+ */
+export function deepExpandEnvVars(value) {
+  if (typeof value === "string") return expandEnvVars(value);
+  if (Array.isArray(value)) return value.map(deepExpandEnvVars);
+  if (isPlainObject(value)) {
+    const result = {};
+    for (const [k, v] of Object.entries(value)) result[k] = deepExpandEnvVars(v);
+    return result;
+  }
+  return value;
+}
