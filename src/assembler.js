@@ -10,10 +10,9 @@
  *
  * Zero changes to runtime.js — this is purely additive.
  */
-
-import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
+import { createRuntimeEnvironment } from "./runtime-plugins.js";
 import { isPlainObject, deepClone } from "./utils.js";
 
 // ─── Binding resolution (mirrors runtime.js, no artifact writing) ─────────────
@@ -206,10 +205,7 @@ function renderAssembled({ definition, targetStep, resolvedPrompt, resolvedInput
  * @returns {Promise<string>}  - assembled Markdown
  */
 export async function assembleRuneflow(definition, stepId, inputs = {}, runtime = {}, options = {}) {
-  const tools = {
-    ...createBuiltinTools({ cwd: options.cwd }),
-    ...(runtime.tools ?? {}),
-  };
+  const tools = createRuntimeEnvironment(runtime, options).tools;
 
   const completedSteps = await executePreSteps(definition, stepId, inputs, tools);
 

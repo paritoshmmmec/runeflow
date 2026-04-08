@@ -382,15 +382,15 @@ runeflow tools inspect git.diff_summary
 
 ```bash
 runeflow init [--name <name>] [--provider <provider>]
-runeflow validate <file>
+runeflow validate <file> [--runtime ./runtime.js]
 runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
 runeflow resume <file> [--runtime ./runtime.js] [--prompt '{"step":"answer"}']
 runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
 runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
 runeflow inspect-run <run-id>
 runeflow import <file> [--output converted.runeflow.md]
-runeflow tools list
-runeflow tools inspect <tool-name>
+runeflow tools list [--runtime ./runtime.js]
+runeflow tools inspect <tool-name> [--runtime ./runtime.js]
 ```
 
 `resume` reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
@@ -446,6 +446,89 @@ export default {
   },
 };
 ```
+
+Runtime modules can also expose `plugins`, which lets tools and their schemas plug into Runeflow without being hard-wired into core runtime code:
+
+```js
+import { createDefaultRuntime, createMcpToolPlugin } from "runeflow";
+
+export default {
+  ...createDefaultRuntime(),
+  plugins: [
+    createMcpToolPlugin({
+      serverName: "docs",
+      tools: [
+        {
+          name: "search",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+      callTool: async ({ input }) => ({
+        content: [input],
+        isError: false,
+      }),
+    }),
+  ],
+};
+```
+
+Plugin-contributed tool schemas are available to `runeflow run`, `runeflow validate`, and `runeflow tools inspect` when you pass the same `--runtime` module.
+
+For a real MCP stdio server, use `createMcpClientPlugin(...)` and let Runeflow discover tools from `tools/list`:
+
+```js
+import { createDefaultRuntime, createMcpClientPlugin } from "runeflow";
+
+const docsPlugin = await createMcpClientPlugin({
+  serverName: "docs",
+  command: "npx",
+  args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+  stderr: "inherit",
+});
+
+export default {
+  ...createDefaultRuntime(),
+  plugins: [docsPlugin],
+};
+```
+
+Discovered MCP input schemas are normalized into Runeflow's validator shape. When a tool does not publish a structured output schema, adapter plugins fall back to a standard raw result envelope:
+
+```js
+{
+  content: [any],
+  isError: boolean,
+  raw: any
+}
+```
+
+Composio fits the same plugin surface:
+
+```js
+import { createDefaultRuntime, createComposioClientPlugin } from "runeflow";
+
+const composioPlugin = await createComposioClientPlugin({
+  toolkits: ["linear"],
+  toolkitVersions: {
+    linear: process.env.COMPOSIO_TOOLKIT_VERSION_LINEAR,
+  },
+  executeDefaults: {
+    connectedAccountId: process.env.COMPOSIO_CONNECTED_ACCOUNT_ID,
+    userId: process.env.COMPOSIO_USER_ID ?? process.env.COMPOSIO_ENTITY_ID,
+  },
+});
+
+export default {
+  ...createDefaultRuntime(),
+  plugins: [composioPlugin],
+};
+```
+
+The default Composio client plugin expects `COMPOSIO_API_KEY` and `@composio/core` for live discovery/execution. For authenticated tools, Composio also expects a connected account id and user id (`userId`; `entityId` / `entity_id` are accepted as aliases by Runeflow), and practical live execution usually wants a pinned toolkit version such as `COMPOSIO_TOOLKIT_VERSION_GITHUB`. For tests or custom auth flows, you can inject your own client with `createClient` or `client`.
 
 ---
 

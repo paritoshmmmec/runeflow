@@ -42,6 +42,7 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 - Schema validation on inputs (registry-backed) and outputs
 - Auth waterfall: env → `.env` → `~/.runeflow/credentials.json`
 - JSON artifacts per run and step
+- Runtime plugin layer for tool/LLM/schema contributions
 
 ### CLI
 `init`, `validate`, `run` (+ `--force`, `--prompt`), `resume`, `watch`, `inspect-run`, `import`, `tools list`, `tools inspect`, `assemble`
@@ -94,6 +95,23 @@ Planner LLM compiles English → runeflow block.
 runeflow build "draft a PR from the current branch" --output draft-pr.runeflow.md
 ```
 
+### MCP-native tool layer
+Use MCP as the default external tool transport and discovery layer so any MCP server can be a Runeflow tool source.
+
+- Discover tools from MCP `tools/list`
+- Trust MCP `inputSchema` when present
+- Treat output schemas as optional, with confidence levels instead of assuming full contracts
+- Support local snapshots/imports so live MCP discovery can become deterministic project state
+- Allow vendor catalogs like Composio to plug in through MCP rather than becoming a hard dependency
+
+### Adapter tool plugins
+Decouple tool execution from core runtime by letting runtimes contribute plugin-backed tool adapters.
+
+- MCP adapter plugin for server-discovered tools
+- Composio adapter plugin for managed tool catalogs and execution
+- Shared raw-result envelope for adapters when output contracts are not fully known
+- Keep `tool` steps stable while swapping transport/execution behind the plugin surface
+
 ### Streaming terminal output
 Add a `--stream` mode for `runeflow run` / `runeflow resume` so users can watch execution live instead of waiting for the final run artifact.
 
@@ -132,6 +150,15 @@ import blocks from "./shared/pr-blocks.runeflow.md"
 
 ### Skill versioning + migration
 `runeflow migrate` updates skill syntax when the DSL changes.
+
+### `runeflow dryrun`
+Plan and validate a run without performing side effects.
+
+- Resolve inputs, interpolation, branches, and schema checks
+- Show which steps would execute, skip, halt, or fail validation
+- Support side-effect policies for `tool` / `cli` steps (`forbid`, `mock`, `allow-safe-readonly`)
+- Emit a trace preview so authors can debug workflows before real execution
+- Make dry runs compatible with MCP-backed tools by allowing discovery without invocation
 
 ---
 

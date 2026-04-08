@@ -5,9 +5,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { checkAuth } from "./auth.js";
-import { createBuiltinTools } from "./builtins.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
+import { createRuntimeEnvironment } from "./runtime-plugins.js";
 import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
 import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
@@ -94,13 +94,7 @@ function projectLlmContext(definition, step) {
 }
 
 function createRuntime(runtime = {}, options = {}) {
-  return {
-    ...runtime,
-    tools: {
-      ...createBuiltinTools({ cwd: options.cwd }),
-      ...(runtime.tools ?? {}),
-    },
-  };
+  return createRuntimeEnvironment(runtime, options);
 }
 
 function resolveLlmConfig(definition, step) {
@@ -780,18 +774,24 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     ...definition,
     workflow: resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }),
   };
-  const toolRegistry = loadToolRegistry(options);
-  const validation = validateSkill(resolvedDefinition, options);
+  const effectiveRuntime = createRuntime(runtime, options);
+  const toolRegistry = loadToolRegistry({
+    ...options,
+    runtimeToolRegistry: effectiveRuntime.toolRegistry,
+  });
+  const validation = validateSkill(resolvedDefinition, {
+    ...options,
+    runtimeToolRegistry: effectiveRuntime.toolRegistry,
+  });
   if (!validation.valid) {
     throw new ValidationError("Skill validation failed.", validation.issues);
   }
 
   const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
-  const effectiveRuntime = createRuntime(runtime, options);
 
   // Auth pre-flight — only check providers not already handled by the runtime
   // Skip entirely if runtime provides its own llms handlers
-  if (options.checkAuth !== false && !runtime.llms) {
+  if (options.checkAuth !== false && Object.keys(effectiveRuntime.llms ?? {}).length === 0) {
     const authErrors = checkAuth(resolvedDefinition, options);
     if (authErrors.length) {
       throw new ValidationError("Auth pre-flight failed.", authErrors);

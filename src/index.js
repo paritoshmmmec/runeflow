@@ -3,5 +3,14 @@ export { resolveWorkflowBlocks } from "./blocks.js";
 export { createDefaultRuntime } from "./default-runtime.js";
 export { importMarkdownRuneflow, importMarkdownSkill } from "./importer.js";
 export { parseRuneflow, parseSkill } from "./parser.js";
+export {
+  ADAPTER_TOOL_RESULT_SCHEMA,
+  collectRuntimeExtensions,
+  createComposioClientPlugin,
+  createMcpClientPlugin,
+  createComposioToolPlugin,
+  createMcpToolPlugin,
+  createRuntimeEnvironment,
+} from "./runtime-plugins.js";
 export { runRuneflow, runSkill } from "./runtime.js";
 export { validateRuneflow, validateSkill } from "./validator.js";

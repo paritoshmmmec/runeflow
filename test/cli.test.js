@@ -422,3 +422,262 @@ output {
     process.chdir(originalCwd);
   }
 });
+
+test("runCli validate loads plugin-contributed tool schemas from --runtime", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-validate-plugin-"));
+  const repoRoot = process.cwd();
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: plugin-validate
+description: Plugin validate
+version: 0.1
+inputs:
+  query: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step search type=tool {
+  tool: mcp.docs.search
+  with: { query: inputs.query }
+}
+
+output {
+  ok: steps.search.isError == false
+}
+\`\`\`
+`,
+  );
+
+  await fs.writeFile(
+    path.join(tempDir, "runtime.js"),
+    `import { createMcpToolPlugin } from ${JSON.stringify(path.join(repoRoot, "src", "runtime-plugins.js"))};
+
+export default {
+  plugins: [
+    createMcpToolPlugin({
+      serverName: "docs",
+      tools: [
+        {
+          name: "search",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+      callTool: async ({ input }) => ({ content: [input], isError: false }),
+    }),
+  ],
+};
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["validate", "./workflow.runeflow.md", "--runtime", "./runtime.js"]),
+    );
+    const validation = JSON.parse(output);
+
+    assert.equal(validation.valid, true);
+    assert.deepEqual(validation.issues, []);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("runCli tools inspect includes plugin-contributed tools from --runtime", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-tools-plugin-"));
+  const repoRoot = process.cwd();
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "runtime.js"),
+    `import { createComposioToolPlugin } from ${JSON.stringify(path.join(repoRoot, "src", "runtime-plugins.js"))};
+
+export default {
+  plugins: [
+    createComposioToolPlugin({
+      tools: [
+        {
+          name: "linear.create_issue",
+          description: "Create a Linear issue",
+          inputSchema: {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+          },
+        },
+      ],
+      executeTool: async ({ input }) => ({ content: [input], isError: false }),
+    }),
+  ],
+};
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["tools", "inspect", "composio.linear.create_issue", "--runtime", "./runtime.js"]),
+    );
+    const entry = JSON.parse(output);
+
+    assert.equal(entry.name, "composio.linear.create_issue");
+    assert.equal(entry.metadata.adapter, "composio");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("runCli run works with a discovered Composio client plugin runtime", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-composio-"));
+  const repoRoot = process.cwd();
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: composio-client-cli
+description: Composio client CLI
+version: 0.1
+inputs:
+  title: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step create_issue type=tool {
+  tool: composio.linear.create_issue
+  with: { title: inputs.title }
+}
+
+output {
+  ok: steps.create_issue.isError == false
+}
+\`\`\`
+`,
+  );
+
+  await fs.writeFile(
+    path.join(tempDir, "runtime.js"),
+    `import { createComposioClientPlugin } from ${JSON.stringify(path.join(repoRoot, "src", "runtime-plugins.js"))};
+
+const plugin = await createComposioClientPlugin({
+  toolkits: ["linear"],
+  createClient: async () => ({
+    tools: {
+      getRawComposioTools: async () => ({
+        items: [
+          {
+            slug: "LINEAR_CREATE_ISSUE",
+            toolkit: { slug: "linear" },
+            description: "Create a Linear issue",
+            inputParameters: {
+              type: "object",
+              properties: { title: { type: "string", minLength: 1 } },
+              required: ["title"],
+            },
+          },
+        ],
+      }),
+      execute: async (_name, request) => ({
+        id: "ISSUE-999",
+        title: request.arguments.title,
+      }),
+    },
+  }),
+});
+
+export default {
+  plugins: [plugin],
+};
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["run", "./workflow.runeflow.md", "--runtime", "./runtime.js", "--input", '{"title":"Ship it"}']),
+    );
+    const run = JSON.parse(output);
+
+    assert.equal(run.status, "success");
+    assert.equal(run.outputs.ok, true);
+    assert.equal(run.steps[0].outputs.raw.id, "ISSUE-999");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("runCli run works with a real MCP stdio plugin runtime", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-mcp-"));
+  const repoRoot = process.cwd();
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: real-mcp-cli
+description: Real MCP CLI
+version: 0.1
+inputs:
+  query: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step search type=tool {
+  tool: mcp.fixture.search
+  with: { query: inputs.query }
+}
+
+output {
+  ok: steps.search.isError == false
+}
+\`\`\`
+`,
+  );
+
+  await fs.writeFile(
+    path.join(tempDir, "runtime.js"),
+    `import { createMcpClientPlugin } from ${JSON.stringify(path.join(repoRoot, "src", "runtime-plugins.js"))};
+
+const plugin = await createMcpClientPlugin({
+  serverName: "fixture",
+  command: process.execPath,
+  args: [${JSON.stringify(path.join(repoRoot, "fixtures", "mcp-test-server.js"))}],
+  stderr: "pipe",
+});
+
+export default {
+  plugins: [plugin],
+};
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["run", "./workflow.runeflow.md", "--runtime", "./runtime.js", "--input", '{"query":"docs"}']),
+    );
+    const run = JSON.parse(output);
+
+    assert.equal(run.status, "success");
+    assert.equal(run.outputs.ok, true);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
