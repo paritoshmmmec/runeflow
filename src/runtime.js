@@ -197,6 +197,541 @@ async function invokeCliStep(step, resolvedCommand, options) {
   }
 }
 
+function buildState(inputs, stepRuns, consts = {}) {
+  return {
+    inputs,
+    stepMap: buildStepState(stepRuns),
+    consts,
+  };
+}
+
+function getRuntimeStepOutputSchema(step, toolRegistry) {
+  if (step.kind === "tool") {
+    return step.out ?? getToolOutputSchema(step.tool, toolRegistry);
+  }
+
+  if (step.kind === "llm") {
+    return step.schema;
+  }
+
+  if (step.kind === "transform") {
+    return step.out;
+  }
+
+  if (step.kind === "cli") {
+    return step.out ?? { stdout: "string", stderr: "string", exit_code: "number" };
+  }
+
+  if (step.kind === "human_input") {
+    return step.out ?? { answer: "any" };
+  }
+
+  return null;
+}
+
+function resolveStepCacheInput(step, state) {
+  if (step.kind === "tool") {
+    return resolveBindings(step.with ?? {}, state);
+  }
+
+  if (step.kind === "llm") {
+    return {
+      prompt: resolveBindings(step.prompt, state),
+      input: resolveBindings(step.input ?? {}, state),
+    };
+  }
+
+  if (step.kind === "branch") {
+    return {
+      matched: evaluateExpression(step.if, state),
+    };
+  }
+
+  if (step.kind === "transform") {
+    return resolveBindings(step.input, state);
+  }
+
+  if (step.kind === "cli") {
+    return {
+      command: resolveBindings(step.command, state),
+    };
+  }
+
+  if (step.kind === "human_input") {
+    return {
+      prompt: resolveBindings(step.prompt, state),
+      choices: step.choices !== undefined ? resolveBindings(step.choices, state) : undefined,
+      default: step.default !== undefined ? resolveBindings(step.default, state) : undefined,
+    };
+  }
+
+  return {};
+}
+
+function createCachedStepRun(step, status, resolvedInput, outputs, inputHash = undefined) {
+  return {
+    id: step.id,
+    kind: step.kind,
+    status,
+    attempts: 0,
+    inputs: deepClone(resolvedInput),
+    outputs: outputs === undefined ? null : deepClone(outputs),
+    error: null,
+    input_hash: inputHash,
+    cached: true,
+    started_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+  };
+}
+
+async function finalizeStepRun({
+  definition,
+  step,
+  stepRun,
+  state,
+  effectiveRuntime,
+  runId,
+  runsDir,
+  useHooks = true,
+}) {
+  if (useHooks) {
+    await callHook(effectiveRuntime.hooks?.afterStep, {
+      runId,
+      step,
+      stepRun: deepClone(stepRun),
+      state,
+    }, stepRun.hook_events);
+  }
+
+  if (!stepRun.hook_events?.length) {
+    stepRun.hook_events = undefined;
+  }
+
+  if (
+    step.kind === "llm"
+    && stepRun.projected_docs === undefined
+    && stepRun.status !== "skipped"
+  ) {
+    stepRun.projected_docs = step.docs
+      ? (definition.docBlocks?.[step.docs] ?? definition.docs)
+      : definition.docs;
+  }
+
+  stepRun.artifact_path = await writeStepArtifact(runId, stepRun, runsDir);
+  stepRun.result_path = stepRun.artifact_path;
+  return stepRun;
+}
+
+async function executeStep({
+  definition,
+  step,
+  state,
+  runId,
+  runsDir,
+  effectiveRuntime,
+  toolRegistry,
+  options,
+  useHooks = true,
+}) {
+  if (step.skip_if && evaluateExpression(step.skip_if, state)) {
+    const skippedRun = await finalizeStepRun({
+      definition,
+      step,
+      state,
+      effectiveRuntime,
+      runId,
+      runsDir,
+      useHooks,
+      stepRun: {
+        id: step.id,
+        kind: step.kind,
+        status: "skipped",
+        attempts: 0,
+        inputs: {},
+        outputs: null,
+        error: null,
+        hook_events: [],
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+      },
+    });
+
+    return { stepRun: skippedRun, outputs: null, error: null, waitingForInput: null };
+  }
+
+  if (step.cache !== false && options.priorSteps && !options.force) {
+    const priorStep = options.priorSteps[step.id];
+
+    if (priorStep?.status === "skipped") {
+      const cachedRun = await finalizeStepRun({
+        definition,
+        step,
+        state,
+        effectiveRuntime,
+        runId,
+        runsDir,
+        useHooks: false,
+        stepRun: createCachedStepRun(step, "skipped", {}, null),
+      });
+
+      return { stepRun: cachedRun, outputs: null, error: null, waitingForInput: null };
+    }
+
+    if (priorStep?.status === "success" && priorStep.input_hash) {
+      const preResolvedInput = resolveStepCacheInput(step, state);
+      const currentHash = hashStepInputs(preResolvedInput ?? {});
+      if (currentHash === priorStep.input_hash) {
+        const cachedRun = await finalizeStepRun({
+          definition,
+          step,
+          state,
+          effectiveRuntime,
+          runId,
+          runsDir,
+          useHooks: false,
+          stepRun: createCachedStepRun(
+            step,
+            "success",
+            preResolvedInput ?? {},
+            priorStep.outputs,
+            currentHash,
+          ),
+        });
+
+        return {
+          stepRun: cachedRun,
+          outputs: deepClone(priorStep.outputs),
+          error: null,
+          waitingForInput: null,
+        };
+      }
+    }
+  }
+
+  const hookEvents = [];
+  if (useHooks) {
+    const beforeResult = await callHook(effectiveRuntime.hooks?.beforeStep, {
+      runId,
+      step,
+      state,
+    }, hookEvents);
+
+    if (beforeResult?.abort) {
+      return {
+        abortRun: {
+          reason: beforeResult.reason ?? `beforeStep aborted step '${step.id}'.`,
+        },
+      };
+    }
+  }
+
+  const startedAt = new Date().toISOString();
+  let attempts = 0;
+  let lastError = null;
+  let finalOutputs = null;
+  let resolvedInput = {};
+  let resolvedPrompt = null;
+  let waitingForInput = null;
+  let resolvedChoices;
+  let resolvedDefault;
+
+  while (attempts <= (step.retry ?? 0)) {
+    attempts += 1;
+
+    try {
+      if (step.kind === "tool") {
+        resolvedInput = resolveBindings(step.with ?? {}, state);
+        const toolInputSchema = getToolInputSchema(step.tool, toolRegistry);
+        if (toolInputSchema) {
+          const inputIssues = validateShape(resolvedInput, toolInputSchema, `steps.${step.id} with`);
+          if (inputIssues.length) {
+            throw new RuntimeError(`Tool input failed validation: ${inputIssues.join("; ")}`);
+          }
+        }
+
+        finalOutputs = await invokeTool(step, resolvedInput, effectiveRuntime, state);
+        const toolOutputSchema = getRuntimeStepOutputSchema(step, toolRegistry);
+        const issues = validateShape(finalOutputs, toolOutputSchema, `steps.${step.id}`);
+        if (issues.length) {
+          throw new RuntimeError(`Tool output failed validation: ${issues.join("; ")}`);
+        }
+      } else if (step.kind === "llm") {
+        resolvedPrompt = resolveBindings(step.prompt, state);
+        resolvedInput = resolveBindings(step.input ?? {}, state);
+        finalOutputs = await invokeLlm(definition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state);
+        const issues = validateShape(finalOutputs, step.schema, `steps.${step.id}`);
+        if (issues.length) {
+          throw new RuntimeError(`LLM output failed validation: ${issues.join("; ")}`);
+        }
+      } else if (step.kind === "branch") {
+        resolvedInput = {
+          matched: evaluateExpression(step.if, state),
+        };
+        const target = resolvedInput.matched ? step.then : step.else;
+        finalOutputs = inferBranchOutput(resolvedInput.matched, target);
+      } else if (step.kind === "transform") {
+        if (process.env.RUNEFLOW_DISABLE_TRANSFORM === "1") {
+          throw new RuntimeError("Transform steps are disabled (RUNEFLOW_DISABLE_TRANSFORM=1).");
+        }
+        resolvedInput = resolveBindings(step.input, state);
+        try {
+          // eslint-disable-next-line no-new-func
+          finalOutputs = new Function("input", `return (${step.expr})`)(resolvedInput);
+        } catch (error) {
+          throw new RuntimeError(`transform '${step.id}' expression failed: ${error.message}`);
+        }
+        const issues = validateShape(finalOutputs, step.out, `steps.${step.id}`);
+        if (issues.length) {
+          throw new RuntimeError(`Transform output failed validation: ${issues.join("; ")}`);
+        }
+      } else if (step.kind === "cli") {
+        resolvedPrompt = resolveBindings(step.command, state);
+        if (typeof resolvedPrompt !== "string" || !resolvedPrompt.trim()) {
+          throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
+        }
+        resolvedInput = { command: resolvedPrompt };
+        finalOutputs = await invokeCliStep(step, resolvedPrompt, options);
+        if (finalOutputs.exit_code !== 0 && step.allow_failure !== true) {
+          throw new RuntimeError(
+            `cli step '${step.id}' exited with code ${finalOutputs.exit_code}.\n`
+            + `stderr: ${finalOutputs.stderr || "(empty)"}`,
+          );
+        }
+        const issues = validateShape(finalOutputs, getRuntimeStepOutputSchema(step, toolRegistry), `steps.${step.id}`);
+        if (issues.length) {
+          throw new RuntimeError(`cli output failed validation: ${issues.join("; ")}`);
+        }
+      } else if (step.kind === "human_input") {
+        resolvedPrompt = resolveBindings(step.prompt, state);
+        resolvedChoices = step.choices !== undefined ? resolveBindings(step.choices, state) : undefined;
+        resolvedDefault = step.default !== undefined ? resolveBindings(step.default, state) : undefined;
+        resolvedInput = {
+          prompt: resolvedPrompt,
+          choices: resolvedChoices,
+          default: resolvedDefault,
+        };
+
+        const promptValues = options.promptValues ?? {};
+        let hasAnswer = Object.prototype.hasOwnProperty.call(promptValues, step.id);
+        let answer = hasAnswer ? promptValues[step.id] : undefined;
+
+        if (!hasAnswer && typeof options.promptHandler === "function") {
+          answer = await options.promptHandler({
+            step,
+            prompt: resolvedPrompt,
+            choices: resolvedChoices,
+            defaultValue: resolvedDefault,
+            state,
+          });
+          hasAnswer = answer !== undefined;
+        }
+
+        if (!hasAnswer && resolvedDefault !== undefined) {
+          answer = resolvedDefault;
+          hasAnswer = true;
+        }
+
+        if (!hasAnswer) {
+          waitingForInput = {
+            prompt: resolvedPrompt,
+            choices: resolvedChoices,
+            default: resolvedDefault,
+          };
+          break;
+        }
+
+        if (resolvedChoices && !resolvedChoices.includes(answer)) {
+          throw new RuntimeError(
+            `human_input step '${step.id}' answer must be one of: ${resolvedChoices.join(", ")}`,
+          );
+        }
+
+        finalOutputs = { answer };
+        const issues = validateShape(finalOutputs, getRuntimeStepOutputSchema(step, toolRegistry), `steps.${step.id}`);
+        if (issues.length) {
+          throw new RuntimeError(`human_input output failed validation: ${issues.join("; ")}`);
+        }
+      } else {
+        throw new RuntimeError(`Unsupported step kind '${step.kind}'.`);
+      }
+
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError && useHooks) {
+    await callHook(effectiveRuntime.hooks?.onStepError, {
+      runId,
+      step,
+      error: serializeError(lastError),
+      attempts,
+      state,
+    }, hookEvents);
+  }
+
+  const stepRun = await finalizeStepRun({
+    definition,
+    step,
+    state,
+    effectiveRuntime,
+    runId,
+    runsDir,
+    useHooks,
+    stepRun: {
+      id: step.id,
+      kind: step.kind,
+      status: waitingForInput ? "waiting_for_input" : (lastError ? "failed" : "success"),
+      attempts,
+      inputs: deepClone(resolvedInput),
+      outputs: lastError || waitingForInput ? null : deepClone(finalOutputs),
+      error: lastError ? serializeError(lastError) : null,
+      input_hash: step.cache !== false ? hashStepInputs(resolvedInput ?? {}) : undefined,
+      projected_docs: step.kind === "llm" ? undefined : undefined,
+      prompt: waitingForInput ? resolvedPrompt : undefined,
+      choices: waitingForInput ? deepClone(resolvedChoices) : undefined,
+      default_value: waitingForInput ? deepClone(resolvedDefault) : undefined,
+      hook_events: hookEvents,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+    },
+  });
+
+  return {
+    stepRun,
+    outputs: stepRun.outputs,
+    error: lastError,
+    waitingForInput,
+  };
+}
+
+async function executeParallelStep({
+  definition,
+  step,
+  childSteps,
+  state,
+  run,
+  runsDir,
+  effectiveRuntime,
+  toolRegistry,
+  options,
+}) {
+  const hookEvents = [];
+  const beforeResult = await callHook(effectiveRuntime.hooks?.beforeStep, {
+    runId: run.run_id,
+    step,
+    state,
+  }, hookEvents);
+
+  if (beforeResult?.abort) {
+    return {
+      abortRun: {
+        reason: beforeResult.reason ?? `beforeStep aborted step '${step.id}'.`,
+      },
+    };
+  }
+
+  const childResults = await Promise.all(childSteps.map((childStep) => executeStep({
+    definition,
+    step: childStep,
+    state,
+    runId: run.run_id,
+    runsDir,
+    effectiveRuntime,
+    toolRegistry,
+    options,
+    useHooks: false,
+  })));
+
+  for (const childResult of childResults) {
+    if (childResult.abortRun) {
+      return childResult;
+    }
+  }
+
+  const startedAt = new Date().toISOString();
+  const childStepRuns = childResults.map((result) => result.stepRun);
+  run.steps.push(...childStepRuns);
+
+  const failedChildren = childResults.filter((result) => result.error);
+  const inputsByStep = Object.fromEntries(childStepRuns.map((stepRun) => [stepRun.id, stepRun.inputs]));
+  const outputsByStep = Object.fromEntries(childStepRuns.map((stepRun) => [stepRun.id, stepRun.outputs]));
+  const finalOutputs = {
+    results: childStepRuns.map((stepRun) => stepRun.outputs),
+    by_step: outputsByStep,
+    step_ids: childStepRuns.map((stepRun) => stepRun.id),
+  };
+
+  let lastError = null;
+  if (failedChildren.length) {
+    lastError = new RuntimeError(
+      `parallel '${step.id}' failed: ${failedChildren
+        .map((result) => `${result.stepRun.id}: ${result.error.message}`)
+        .join("; ")}`,
+    );
+
+    await callHook(effectiveRuntime.hooks?.onStepError, {
+      runId: run.run_id,
+      step,
+      error: serializeError(lastError),
+      attempts: 1,
+      state,
+    }, hookEvents);
+  } else {
+    const issues = validateShape(
+      finalOutputs,
+      step.out ?? { results: ["any"], step_ids: ["string"] },
+      `steps.${step.id}`,
+    );
+
+    if (issues.length) {
+      lastError = new RuntimeError(`parallel output failed validation: ${issues.join("; ")}`);
+      await callHook(effectiveRuntime.hooks?.onStepError, {
+        runId: run.run_id,
+        step,
+        error: serializeError(lastError),
+        attempts: 1,
+        state,
+      }, hookEvents);
+    }
+  }
+
+  const stepRun = await finalizeStepRun({
+    definition,
+    step,
+    state,
+    effectiveRuntime,
+    runId: run.run_id,
+    runsDir,
+    useHooks: true,
+    stepRun: {
+      id: step.id,
+      kind: step.kind,
+      status: lastError ? "failed" : "success",
+      attempts: 1,
+      inputs: {
+        by_step: deepClone(inputsByStep),
+      },
+      outputs: lastError ? null : deepClone(finalOutputs),
+      error: lastError ? serializeError(lastError) : null,
+      input_hash: step.cache !== false ? hashStepInputs(inputsByStep) : undefined,
+      hook_events: hookEvents,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+    },
+  });
+
+  run.steps.push(stepRun);
+
+  return {
+    stepRun,
+    outputs: stepRun.outputs,
+    error: lastError,
+  };
+}
+
 export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   const resolvedDefinition = {
     ...definition,
@@ -239,229 +774,61 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
 
   while (index < resolvedDefinition.workflow.steps.length) {
     const step = resolvedDefinition.workflow.steps[index];
-    const state = {
-      inputs,
-      stepMap: buildStepState(run.steps),
-      consts: resolvedDefinition.consts ?? {},
-    };
+    const state = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
+    const result = step.kind === "parallel"
+      ? await executeParallelStep({
+        definition: resolvedDefinition,
+        step,
+        childSteps: resolvedDefinition.workflow.steps.slice(index + 1, index + 1 + step.steps.length),
+        state,
+        run,
+        runsDir,
+        effectiveRuntime,
+        toolRegistry,
+        options,
+      })
+      : await executeStep({
+        definition: resolvedDefinition,
+        step,
+        state,
+        runId: run.run_id,
+        runsDir,
+        effectiveRuntime,
+        toolRegistry,
+        options,
+      });
 
-    // skip_if — evaluate before hooks, skip cleanly with null outputs
-    if (step.skip_if) {
-      const shouldSkip = evaluateExpression(step.skip_if, state);
-      if (shouldSkip) {
-        const skippedRun = {
-          id: step.id,
-          kind: step.kind,
-          status: "skipped",
-          attempts: 0,
-          inputs: {},
-          outputs: null,
-          error: null,
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        };
-        skippedRun.artifact_path = await writeStepArtifact(run.run_id, skippedRun, runsDir);
-        skippedRun.result_path = skippedRun.artifact_path;
-        run.steps.push(skippedRun);
-        index += 1;
-        continue;
-      }
-    }
-
-    let attempts = 0;
-    let lastError = null;
-    let finalOutputs = null;
-    let resolvedInput = {};
-    let resolvedPrompt = null;
-    const hookEvents = [];
-
-    // Input-hash caching / resume: replay prior successful or skipped steps
-    if (step.cache !== false && options.priorSteps && !options.force) {
-      const priorStep = options.priorSteps[step.id];
-
-      // Replay a previously skipped step as-is
-      if (priorStep?.status === "skipped") {
-        const cachedRun = {
-          id: step.id,
-          kind: step.kind,
-          status: "skipped",
-          attempts: 0,
-          inputs: {},
-          outputs: null,
-          error: null,
-          cached: true,
-          started_at: new Date().toISOString(),
-          finished_at: new Date().toISOString(),
-        };
-        cachedRun.artifact_path = await writeStepArtifact(run.run_id, cachedRun, runsDir);
-        cachedRun.result_path = cachedRun.artifact_path;
-        run.steps.push(cachedRun);
-        index += 1;
-        continue;
-      }
-
-      // Replay a prior successful step if input hash matches
-      if (priorStep?.status === "success" && priorStep.input_hash) {
-        const preResolvedInput = resolveBindings(step.with ?? step.input ?? {}, state);
-        const currentHash = hashStepInputs(preResolvedInput);
-        if (currentHash === priorStep.input_hash) {
-          const cachedRun = {
-            id: step.id,
-            kind: step.kind,
-            status: "success",
-            attempts: 0,
-            inputs: deepClone(preResolvedInput),
-            outputs: deepClone(priorStep.outputs),
-            error: null,
-            input_hash: currentHash,
-            cached: true,
-            started_at: new Date().toISOString(),
-            finished_at: new Date().toISOString(),
-          };
-          cachedRun.artifact_path = await writeStepArtifact(run.run_id, cachedRun, runsDir);
-          cachedRun.result_path = cachedRun.artifact_path;
-          run.steps.push(cachedRun);
-          index += 1;
-          continue;
-        }
-      }
-    }
-
-    const beforeResult = await callHook(effectiveRuntime.hooks?.beforeStep, {
-      runId: run.run_id,
-      step,
-      state,
-    }, hookEvents);
-
-    if (beforeResult?.abort) {
-      failRun(run, beforeResult.reason ?? `beforeStep aborted step '${step.id}'.`);
+    if (result.abortRun) {
+      failRun(run, result.abortRun.reason);
       run.outputs = {};
       run.artifact_path = await writeRunArtifact(run, runsDir);
       return run;
     }
 
-    while (attempts <= (step.retry ?? 0)) {
-      attempts += 1;
-
-      try {
-        if (step.kind === "tool") {
-          resolvedInput = resolveBindings(step.with ?? {}, state);
-          // Validate input against registry inputSchema if available
-          const toolInputSchema = getToolInputSchema(step.tool, toolRegistry);
-          if (toolInputSchema) {
-            const inputIssues = validateShape(resolvedInput, toolInputSchema, `steps.${step.id} with`);
-            if (inputIssues.length) {
-              throw new RuntimeError(`Tool input failed validation: ${inputIssues.join("; ")}`);
-            }
-          }
-          finalOutputs = await invokeTool(step, resolvedInput, effectiveRuntime, state);
-          const toolOutputSchema = step.out ?? getToolOutputSchema(step.tool, toolRegistry);
-          const issues = validateShape(finalOutputs, toolOutputSchema, `steps.${step.id}`);
-          if (issues.length) {
-            throw new RuntimeError(`Tool output failed validation: ${issues.join("; ")}`);
-          }
-        } else if (step.kind === "llm") {
-          resolvedPrompt = resolveBindings(step.prompt, state);
-          resolvedInput = resolveBindings(step.input ?? {}, state);
-          finalOutputs = await invokeLlm(resolvedDefinition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state);
-          const issues = validateShape(finalOutputs, step.schema, `steps.${step.id}`);
-          if (issues.length) {
-            throw new RuntimeError(`LLM output failed validation: ${issues.join("; ")}`);
-          }
-          resolvedPrompt = resolvedPrompt; // captured for artifact
-        } else if (step.kind === "branch") {
-          const matched = evaluateExpression(step.if, state);
-          const target = matched ? step.then : step.else;
-          finalOutputs = inferBranchOutput(matched, target);
-        } else if (step.kind === "transform") {
-          if (process.env.RUNEFLOW_DISABLE_TRANSFORM === "1") {
-            throw new RuntimeError("Transform steps are disabled (RUNEFLOW_DISABLE_TRANSFORM=1).");
-          }
-          const resolvedTransformInput = resolveBindings(step.input, state);
-          try {
-            // eslint-disable-next-line no-new-func
-            finalOutputs = new Function("input", `return (${step.expr})`)(resolvedTransformInput);
-          } catch (error) {
-            throw new RuntimeError(`transform '${step.id}' expression failed: ${error.message}`);
-          }
-          const issues = validateShape(finalOutputs, step.out, `steps.${step.id}`);
-          if (issues.length) {
-            throw new RuntimeError(`Transform output failed validation: ${issues.join("; ")}`);
-          }
-        } else if (step.kind === "cli") {
-          const resolvedCommand = resolveBindings(step.command, state);
-          if (typeof resolvedCommand !== "string" || !resolvedCommand.trim()) {
-            throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
-          }
-          resolvedInput = { command: resolvedCommand };
-          finalOutputs = await invokeCliStep(step, resolvedCommand, options);
-          // Non-zero exit_code triggers failure unless the step opts out via out schema
-          if (finalOutputs.exit_code !== 0 && step.allow_failure !== true) {
-            throw new RuntimeError(
-              `cli step '${step.id}' exited with code ${finalOutputs.exit_code}.\n` +
-              `stderr: ${finalOutputs.stderr || "(empty)"}`,
-            );
-          }
-          const cliOutputSchema = step.out ?? { stdout: "string", stderr: "string", exit_code: "number" };
-          const issues = validateShape(finalOutputs, cliOutputSchema, `steps.${step.id}`);
-          if (issues.length) {
-            throw new RuntimeError(`cli output failed validation: ${issues.join("; ")}`);
-          }
-        } else {
-          throw new RuntimeError(`Unsupported step kind '${step.kind}'.`);
-        }
-
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error;
-      }
+    if (step.kind !== "parallel") {
+      run.steps.push(result.stepRun);
     }
 
-    if (lastError) {
-      await callHook(effectiveRuntime.hooks?.onStepError, {
-        runId: run.run_id,
-        step,
-        error: serializeError(lastError),
-        attempts,
-        state,
-      }, hookEvents);
+    if (result.waitingForInput) {
+      run.status = "halted_on_input";
+      run.halted_step_id = step.id;
+      run.pending_input = {
+        step_id: step.id,
+        prompt: result.waitingForInput.prompt,
+        choices: result.waitingForInput.choices ?? null,
+        default: result.waitingForInput.default,
+      };
+      run.error = null;
+      run.finished_at = new Date().toISOString();
+      run.outputs = {};
+      run.artifact_path = await writeRunArtifact(run, runsDir);
+      return run;
     }
 
-    const stepRun = {
-      id: step.id,
-      kind: step.kind,
-      status: lastError ? "failed" : "success",
-      attempts,
-      inputs: deepClone(resolvedInput),
-      outputs: lastError ? null : deepClone(finalOutputs),
-      error: lastError ? serializeError(lastError) : null,
-      input_hash: step.cache !== false ? hashStepInputs(resolvedInput) : undefined,
-      projected_docs: step.kind === "llm" ? (step.docs
-        ? (resolvedDefinition.docBlocks?.[step.docs] ?? resolvedDefinition.docs)
-        : resolvedDefinition.docs) : undefined,
-      hook_events: hookEvents,
-      started_at: new Date().toISOString(),
-      finished_at: new Date().toISOString(),
-    };
-
-    run.steps.push(stepRun);
-
-    await callHook(effectiveRuntime.hooks?.afterStep, {
-      runId: run.run_id,
-      step,
-      stepRun: deepClone(stepRun),
-      state,
-    }, hookEvents);
-
-    if (!stepRun.hook_events.length) stepRun.hook_events = undefined;
-    stepRun.artifact_path = await writeStepArtifact(run.run_id, stepRun, runsDir);
-    stepRun.result_path = stepRun.artifact_path;
-
-    if (lastError) {
+    if (result.error) {
       const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
       if (!step.fallback || step.fallback === "fail") {
-        haltRun(run, step.id, resolvedFailMessage ?? lastError.message, lastError);
+        haltRun(run, step.id, resolvedFailMessage ?? result.error.message, result.error);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
         return run;
@@ -472,7 +839,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     }
 
     if (step.kind === "branch") {
-      if (finalOutputs.target === "fail") {
+      if (result.outputs.target === "fail") {
         const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
         failRun(run, resolvedFailMessage ?? `Branch '${step.id}' selected fail target.`);
         run.outputs = {};
@@ -480,7 +847,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
         return run;
       }
 
-      index = stepIndex.get(finalOutputs.target);
+      index = stepIndex.get(result.outputs.target);
       continue;
     }
 
@@ -497,13 +864,10 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
       continue;
     }
 
-    index += 1;
+    index += step.kind === "parallel" ? step.steps.length + 1 : 1;
   }
 
-  const finalState = {
-    inputs,
-    stepMap: buildStepState(run.steps),
-  };
+  const finalState = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
 
   run.outputs = resolveBindings(resolvedDefinition.workflow.output, finalState);
   const outputIssues = validateShape(run.outputs, resolvedDefinition.metadata.outputs, "outputs");

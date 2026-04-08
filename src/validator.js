@@ -68,6 +68,13 @@ function getStepOutputSchema(step, toolRegistry) {
     return step.out ?? getToolOutputSchema(step.tool, toolRegistry);
   }
 
+  if (step.kind === "parallel") {
+    return step.out ?? {
+      results: ["any"],
+      step_ids: ["string"],
+    };
+  }
+
   if (step.kind === "llm") {
     return step.schema ?? null;
   }
@@ -85,6 +92,10 @@ function getStepOutputSchema(step, toolRegistry) {
 
   if (step.kind === "cli") {
     return step.out ?? { stdout: "string", stderr: "string", exit_code: "number" };
+  }
+
+  if (step.kind === "human_input") {
+    return step.out ?? { answer: "any" };
   }
 
   return null;
@@ -164,6 +175,8 @@ export function validateSkill(definition, options = {}) {
   const consts = definition.consts ?? {};
   const seenStepIds = new Set();
   const toolRegistry = loadToolRegistry(options);
+  const parallelChildren = new Map();
+  const parallelChildOwners = new Map();
 
   if (!metadata.name) {
     issues.push("metadata.name is required");
@@ -200,7 +213,15 @@ export function validateSkill(definition, options = {}) {
 
     seenStepIds.add(step.id);
 
-    if (step.kind !== "tool" && step.kind !== "llm" && step.kind !== "branch" && step.kind !== "transform" && step.kind !== "cli") {
+    if (
+      step.kind !== "tool"
+      && step.kind !== "parallel"
+      && step.kind !== "llm"
+      && step.kind !== "branch"
+      && step.kind !== "transform"
+      && step.kind !== "cli"
+      && step.kind !== "human_input"
+    ) {
       issues.push(`step '${step.id}' has unsupported kind '${step.kind}'`);
       continue;
     }
@@ -216,6 +237,29 @@ export function validateSkill(definition, options = {}) {
 
       if (!step.out && !getToolOutputSchema(step.tool, toolRegistry)) {
         issues.push(`step '${step.id}' must declare an out schema or reference a registered tool with an outputSchema`);
+      }
+    }
+
+    if (step.kind === "parallel") {
+      if (!Array.isArray(step.steps) || step.steps.length === 0) {
+        issues.push(`parallel '${step.id}' must declare a non-empty steps array`);
+      } else {
+        const childIds = new Set();
+        for (const childId of step.steps) {
+          if (typeof childId !== "string" || !childId.trim()) {
+            issues.push(`parallel '${step.id}' steps must contain non-empty step ids`);
+            continue;
+          }
+
+          if (childIds.has(childId)) {
+            issues.push(`parallel '${step.id}' declares duplicate child step '${childId}'`);
+          }
+          childIds.add(childId);
+        }
+      }
+
+      if (step.out !== undefined && step.out !== null && !isPlainObject(step.out)) {
+        issues.push(`parallel '${step.id}' out must be an object schema`);
       }
     }
 
@@ -259,6 +303,24 @@ export function validateSkill(definition, options = {}) {
       }
     }
 
+    if (step.kind === "human_input") {
+      if (typeof step.prompt !== "string" || !step.prompt.trim()) {
+        issues.push(`step '${step.id}' must declare a prompt`);
+      }
+
+      if (step.choices !== undefined) {
+        if (!Array.isArray(step.choices) || step.choices.length === 0) {
+          issues.push(`step '${step.id}' choices must be a non-empty array when provided`);
+        } else if (step.choices.some((choice) => typeof choice !== "string")) {
+          issues.push(`step '${step.id}' choices must contain only strings`);
+        }
+      }
+
+      if (step.out !== undefined && step.out !== null && !isPlainObject(step.out)) {
+        issues.push(`step '${step.id}' out must be an object schema`);
+      }
+    }
+
     if (step.kind === "branch") {
       if (typeof step.if !== "string") {
         issues.push(`branch '${step.id}' must declare an if expression`);
@@ -288,6 +350,61 @@ export function validateSkill(definition, options = {}) {
   }
 
   for (const step of workflow.steps) {
+    if (step.kind !== "parallel" || !Array.isArray(step.steps)) {
+      continue;
+    }
+
+    const currentIndex = stepIndex.get(step.id);
+    const followingIds = workflow.steps
+      .slice(currentIndex + 1, currentIndex + 1 + step.steps.length)
+      .map((childStep) => childStep.id);
+
+    if (followingIds.length !== step.steps.length || followingIds.join(",") !== step.steps.join(",")) {
+      issues.push(
+        `parallel '${step.id}' child steps must be declared immediately after the parallel block in matching order`,
+      );
+    }
+
+    parallelChildren.set(step.id, new Set(step.steps));
+
+    for (const childId of step.steps) {
+      const childIndex = stepIndex.get(childId);
+
+      if (childIndex === undefined) {
+        issues.push(`parallel '${step.id}' references unknown child step '${childId}'`);
+        continue;
+      }
+
+      if (childIndex <= currentIndex) {
+        issues.push(`parallel '${step.id}' child step '${childId}' must point forward`);
+        continue;
+      }
+
+      if (parallelChildOwners.has(childId)) {
+        issues.push(
+          `parallel child step '${childId}' is already owned by parallel '${parallelChildOwners.get(childId)}'`,
+        );
+        continue;
+      }
+
+      parallelChildOwners.set(childId, step.id);
+
+      const childStep = workflow.steps[childIndex];
+      if (childStep.kind !== "tool") {
+        issues.push(`parallel '${step.id}' child step '${childId}' must be a tool step`);
+      }
+
+      if (childStep.next) {
+        issues.push(`parallel child step '${childId}' may not declare next`);
+      }
+
+      if (childStep.fallback) {
+        issues.push(`parallel child step '${childId}' may not declare fallback`);
+      }
+    }
+  }
+
+  for (const step of workflow.steps) {
     const currentIndex = stepIndex.get(step.id);
     const schema = getStepOutputSchema(step, toolRegistry);
 
@@ -314,6 +431,11 @@ export function validateSkill(definition, options = {}) {
         continue;
       }
 
+      if (parallelChildOwners.has(target)) {
+        issues.push(`step '${step.id}' ${label} target '${target}' may not point to a parallel child step`);
+        continue;
+      }
+
       if (stepIndex.get(target) <= currentIndex) {
         issues.push(`step '${step.id}' ${label} target '${target}' must point forward`);
       }
@@ -328,6 +450,12 @@ export function validateSkill(definition, options = {}) {
     if (step.kind === "llm") {
       references.push(...collectReferences(step.prompt ?? "", issues, `step '${step.id}' prompt`));
       references.push(...collectReferences(step.input ?? {}, issues, `step '${step.id}' input`));
+    }
+
+    if (step.kind === "human_input") {
+      references.push(...collectReferences(step.prompt ?? "", issues, `step '${step.id}' prompt`));
+      references.push(...collectReferences(step.choices ?? [], issues, `step '${step.id}' choices`));
+      references.push(...collectReferences(step.default, issues, `step '${step.id}' default`));
     }
 
     if (step.kind === "transform") {
@@ -357,6 +485,19 @@ export function validateSkill(definition, options = {}) {
     for (const reference of references) {
       for (const pathExpression of reference.paths) {
         validateReferencePath(pathExpression, metadata.inputs, consts, availableSteps, issues, reference.location);
+
+        const ownerId = parallelChildOwners.get(step.id);
+        if (!ownerId || !pathExpression.startsWith("steps.")) {
+          continue;
+        }
+
+        const referencedStepId = pathExpression.split(".")[1];
+        const groupIds = parallelChildren.get(ownerId) ?? new Set();
+        if (referencedStepId === ownerId || groupIds.has(referencedStepId)) {
+          issues.push(
+            `${reference.location}: parallel child step '${step.id}' may not reference sibling step '${referencedStepId}'`,
+          );
+        }
       }
     }
 

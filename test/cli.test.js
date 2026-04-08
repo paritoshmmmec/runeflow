@@ -8,6 +8,7 @@ import { runInit } from "../src/init.js";
 
 async function captureStdout(fn) {
   const originalLog = console.log;
+  const originalExitCode = process.exitCode;
   const lines = [];
 
   console.log = (...args) => {
@@ -18,6 +19,7 @@ async function captureStdout(fn) {
     await fn();
   } finally {
     console.log = originalLog;
+    process.exitCode = originalExitCode;
   }
 
   return lines.join("\n");
@@ -323,6 +325,99 @@ test("parseOptions: --force without a value is treated as boolean true", async (
 
     const content = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
     assert.ok(content.includes("name: my-skill"), "file was overwritten");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("runCli run accepts human_input answers via --prompt", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-prompt-"));
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: prompt-demo
+description: Prompt demo
+version: 0.1
+inputs: {}
+outputs:
+  answer: string
+---
+
+\`\`\`runeflow
+step confirm type=human_input {
+  prompt: "Deploy?"
+  choices: ["yes", "no"]
+}
+
+output {
+  answer: steps.confirm.answer
+}
+\`\`\`
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["run", "./workflow.runeflow.md", "--prompt", '{"confirm":"yes"}']),
+    );
+    const run = JSON.parse(output);
+
+    assert.equal(run.status, "success");
+    assert.equal(run.outputs.answer, "yes");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("runCli resume continues a halted_on_input run with --prompt", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-resume-input-"));
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: resume-input-demo
+description: Resume input demo
+version: 0.1
+inputs: {}
+outputs:
+  answer: string
+---
+
+\`\`\`runeflow
+step confirm type=human_input {
+  prompt: "Deploy?"
+  choices: ["yes", "no"]
+}
+
+output {
+  answer: steps.confirm.answer
+}
+\`\`\`
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const firstOutput = await captureStdout(() =>
+      runCli(["run", "./workflow.runeflow.md"]),
+    );
+    const firstRun = JSON.parse(firstOutput);
+
+    assert.equal(firstRun.status, "halted_on_input");
+
+    const resumedOutput = await captureStdout(() =>
+      runCli(["resume", "./workflow.runeflow.md", "--prompt", '{"confirm":"no"}']),
+    );
+    const resumedRun = JSON.parse(resumedOutput);
+
+    assert.equal(resumedRun.status, "success");
+    assert.equal(resumedRun.outputs.answer, "no");
   } finally {
     process.chdir(originalCwd);
   }

@@ -22,7 +22,7 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 ## Shipped (v0.1.x)
 
 ### Step kinds
-`tool`, `llm`, `branch`, `transform`, `block`, `cli`
+`tool`, `parallel`, `llm`, `branch`, `transform`, `block`, `cli`, `human_input`
 
 ### Control flow
 `retry`, `fallback`, `fail`, `next`, `skip_if`, `cache=false`, `allow_failure`, `--force`
@@ -37,13 +37,14 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 ### Runtime
 - Lifecycle hooks: `beforeStep`, `afterStep`, `onStepError`
 - `halted_on_error` status + `halted_step_id`
+- `halted_on_input` status + `pending_input`
 - Input-hash caching + `runeflow resume`
 - Schema validation on inputs (registry-backed) and outputs
 - Auth waterfall: env → `.env` → `~/.runeflow/credentials.json`
 - JSON artifacts per run and step
 
 ### CLI
-`init`, `validate`, `run` (+ `--force`), `resume`, `inspect-run`, `import`, `tools list`, `tools inspect`, `assemble`
+`init`, `validate`, `run` (+ `--force`, `--prompt`), `resume`, `watch`, `inspect-run`, `import`, `tools list`, `tools inspect`, `assemble`
 
 ### Built-in tools (10)
 `git.current_branch`, `git.diff_summary`, `git.push_current_branch`, `git.log`, `git.tag_list`,
@@ -66,44 +67,13 @@ The runtime owns execution semantics. The LLM participates only inside bounded `
 
 ---
 
-## Next: Wave 2 remaining
+## Remaining before Wave 3
 
 ### 1. Publish `runeflow-registry` to npm
 The package is scaffolded at `packages/runeflow-registry/`. Needs:
 - Tests for each provider (mock the SDK calls)
 - `npm publish` from `packages/runeflow-registry/`
 - Add to README install instructions
-
-### 2. Parallel tool steps
-Fan out N tool calls, join outputs. Constrained to `tool` steps only — no LLM or branch in parallel.
-
-```runeflow
-parallel gather {
-  steps: [gather_slack, gather_drive, gather_email]
-  out: { results: [any] }
-}
-```
-
-Cuts latency on multi-source workflows (3p-updates, incident summaries) from sequential to concurrent.
-Touches: `src/runtime.js`, `src/validator.js`, `src/parser.js`
-
-### 3. `human_input` step (design TBD)
-Pause execution, collect user input, resume. The challenge: input can be deep in a workflow and may depend on prior step outputs. Two open design questions:
-
-- **Shallow case** (`prompt.*` namespace): values known before execution, supplied via `--prompt` flag or `promptHandler` option
-- **Deep case** (`halted_on_input` status): runtime halts intentionally at the step, persists state, user supplies answer, `runeflow resume` continues
-
-Parking until the design is clear. The `resume` + `halted_on_error` machinery already handles the deep case mechanically — just needs the intentional halt trigger and a way to surface the question.
-
-### 4. `runeflow watch`
-Run a skill on a schedule or file change.
-
-```bash
-runeflow watch ./standup.runeflow.md --cron "0 9 * * 1-5"
-runeflow watch ./lint-check.runeflow.md --on-change "src/**/*.js"
-```
-
-Turns skills into background automations. Touches: `src/cli.js` + a scheduler (node-cron or chokidar).
 
 ---
 
