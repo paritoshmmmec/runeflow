@@ -92,6 +92,7 @@ function normalizePluginShape(plugin, source = "runtime plugin") {
     tools: plugin.tools ?? {},
     llms: plugin.llms ?? {},
     toolRegistry: normalizeToolRegistry(plugin.toolRegistry),
+    close: typeof plugin.close === "function" ? plugin.close : undefined,
   };
 }
 
@@ -144,6 +145,19 @@ export function createRuntimeEnvironment(runtime = {}, options = {}) {
     llms: extensions.llms,
     toolRegistry: extensions.toolRegistry,
   };
+}
+
+export async function closeRuntimePlugins(runtime = {}) {
+  const pluginClosers = (runtime.plugins ?? [])
+    .map((plugin) => plugin?.close)
+    .filter((closeFn) => typeof closeFn === "function");
+
+  const results = await Promise.allSettled(pluginClosers.map((closeFn) => closeFn()));
+  const firstFailure = results.find((result) => result.status === "rejected");
+
+  if (firstFailure) {
+    throw firstFailure.reason;
+  }
 }
 
 function buildAdapterToolEntries(tools, buildName, buildDescription, metadataFactory) {
@@ -237,27 +251,110 @@ export function createMcpToolPlugin({
   };
 }
 
-function createMcpClient(serverName, clientInfo = { name: "runeflow", version: "0.1.0" }) {
+function createMcpClient(clientInfo = { name: "runeflow", version: "0.1.0" }) {
   return new Client(clientInfo);
 }
 
-async function withMcpClient(server, fn) {
-  const client = createMcpClient(server.clientInfo);
-  const transport = new StdioClientTransport({
-    command: server.command,
-    args: server.args,
-    env: server.env,
-    cwd: server.cwd,
-    stderr: server.stderr,
-  });
+function createManagedMcpSession(server, options = {}) {
+  const idleTimeoutMs = options.idleTimeoutMs ?? 50;
+  let client = null;
+  let transport = null;
+  let connectPromise = null;
+  let activeUsers = 0;
+  let idleTimer = null;
 
-  await client.connect(transport);
+  const cancelIdleClose = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
 
-  try {
-    return await fn(client);
-  } finally {
-    await transport.close().catch(() => {});
-  }
+  const close = async () => {
+    cancelIdleClose();
+
+    if (connectPromise) {
+      await connectPromise.catch(() => {});
+    }
+
+    connectPromise = null;
+
+    const closingClient = client;
+    const closingTransport = transport;
+    client = null;
+    transport = null;
+
+    if (closingClient?.close) {
+      await closingClient.close().catch(() => {});
+      return;
+    }
+
+    if (closingTransport?.close) {
+      await closingTransport.close().catch(() => {});
+    }
+  };
+
+  const scheduleIdleClose = () => {
+    cancelIdleClose();
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      void close();
+    }, idleTimeoutMs);
+    idleTimer.unref?.();
+  };
+
+  const ensureConnected = async () => {
+    if (client) {
+      return client;
+    }
+
+    if (connectPromise) {
+      return connectPromise;
+    }
+
+    const nextClient = createMcpClient(server.clientInfo);
+    const nextTransport = new StdioClientTransport({
+      command: server.command,
+      args: server.args,
+      env: server.env,
+      cwd: server.cwd,
+      stderr: server.stderr,
+    });
+
+    connectPromise = nextClient.connect(nextTransport)
+      .then(() => {
+        client = nextClient;
+        transport = nextTransport;
+        return nextClient;
+      })
+      .catch(async (error) => {
+        await nextTransport.close().catch(() => {});
+        throw error;
+      })
+      .finally(() => {
+        connectPromise = null;
+      });
+
+    return connectPromise;
+  };
+
+  return {
+    useClient: async (fn) => {
+      cancelIdleClose();
+      activeUsers += 1;
+
+      try {
+        const connectedClient = await ensureConnected();
+        return await fn(connectedClient);
+      } finally {
+        activeUsers -= 1;
+        if (activeUsers === 0) {
+          scheduleIdleClose();
+        }
+      }
+    },
+    close,
+  };
 }
 
 export async function createMcpClientPlugin({
@@ -269,6 +366,7 @@ export async function createMcpClientPlugin({
   stderr,
   prefix = "mcp",
   clientInfo,
+  idleTimeoutMs,
 }) {
   if (typeof serverName !== "string" || !serverName.trim()) {
     throw new Error("createMcpClientPlugin requires a non-empty serverName");
@@ -288,12 +386,14 @@ export async function createMcpClientPlugin({
     clientInfo,
   };
 
-  const tools = await withMcpClient(server, async (client) => {
+  const session = createManagedMcpSession(server, { idleTimeoutMs });
+
+  const tools = await session.useClient(async (client) => {
     const result = await client.listTools();
     return result.tools ?? [];
   });
 
-  return createMcpToolPlugin({
+  const plugin = createMcpToolPlugin({
     serverName,
     prefix,
     tools: tools.map((tool) => ({
@@ -302,14 +402,18 @@ export async function createMcpClientPlugin({
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema ?? (tool.structuredOutputSchema ?? undefined),
     })),
-    callTool: async ({ server: discoveredServer, name, input }) => withMcpClient(
-      { ...server, serverName: discoveredServer },
+    callTool: async ({ server: discoveredServer, name, input }) => session.useClient(
       async (client) => client.callTool({
         name,
         arguments: input,
       }),
     ),
   });
+
+  return {
+    ...plugin,
+    close: session.close,
+  };
 }
 
 function extractComposioTools(result) {
