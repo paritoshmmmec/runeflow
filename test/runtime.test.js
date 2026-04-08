@@ -724,6 +724,72 @@ output {
   assert.equal(run.steps[0].outputs.content[0].text, "match:runeflow");
 });
 
+test("runRuneflow reuses one MCP subprocess across discovery and multiple tool calls", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-mcp-reuse-"));
+  const startsFile = path.join(runsDir, "mcp-starts.txt");
+  await fs.writeFile(startsFile, "0");
+
+  const parsed = parseRuneflow(`---
+name: mcp-reuse
+description: Reuse MCP process
+version: 0.1
+inputs:
+  first: string
+  second: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step first type=tool {
+  tool: mcp.fixture.search
+  with: { query: inputs.first }
+}
+
+step second type=tool {
+  tool: mcp.fixture.search
+  with: { query: inputs.second }
+}
+
+output {
+  ok: steps.second.isError == false
+}
+\`\`\`
+`);
+
+  const plugin = await createMcpClientPlugin({
+    serverName: "fixture",
+    command: process.execPath,
+    args: [path.resolve("fixtures/mcp-test-server.js")],
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      RUNEFLOW_MCP_STARTS_FILE: startsFile,
+    },
+  });
+
+  try {
+    const run = await runRuneflow(
+      parsed,
+      { first: "alpha", second: "beta" },
+      {
+        plugins: [plugin],
+      },
+      { runsDir },
+    );
+
+    assert.equal(run.status, "success");
+    assert.equal(run.outputs.ok, true);
+    assert.equal(run.steps[0].outputs.content[0].text, "match:alpha");
+    assert.equal(run.steps[1].outputs.content[0].text, "match:beta");
+
+    const starts = Number.parseInt(await fs.readFile(startsFile, "utf8"), 10);
+    assert.equal(starts, 1);
+  } finally {
+    await plugin.close?.();
+  }
+});
+
 test("runRuneflow uses step-level llm override over metadata default", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
   const parsed = parseRuneflow(`---

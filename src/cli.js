@@ -8,7 +8,7 @@ import { assembleRuneflow } from "./assembler.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { runInit } from "./init.js";
 import { parseRuneflow } from "./parser.js";
-import { createRuntimeEnvironment } from "./runtime-plugins.js";
+import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
 import { runRuneflow } from "./runtime.js";
 import { loadToolRegistry } from "./tool-registry.js";
 import { validateRuneflow } from "./validator.js";
@@ -225,12 +225,16 @@ export async function runCli(argv) {
     const definition = parseRuneflow(source, { sourcePath: target });
     const runtime = await loadRuntime(options.runtime);
     const effectiveRuntime = createRuntimeEnvironment(runtime, {});
-    const validation = validateRuneflow(definition, {
-      runtimeToolRegistry: effectiveRuntime.toolRegistry,
-    });
-    console.log(JSON.stringify(validation, null, 2));
-    if (!validation.valid) {
-      process.exitCode = 1;
+    try {
+      const validation = validateRuneflow(definition, {
+        runtimeToolRegistry: effectiveRuntime.toolRegistry,
+      });
+      console.log(JSON.stringify(validation, null, 2));
+      if (!validation.valid) {
+        process.exitCode = 1;
+      }
+    } finally {
+      await closeRuntimePlugins(effectiveRuntime).catch(() => {});
     }
     return;
   }
@@ -450,42 +454,46 @@ export async function runCli(argv) {
     const subcommand = positional[0];
     const runtime = await loadRuntime(options.runtime);
     const effectiveRuntime = createRuntimeEnvironment(runtime, {});
-    const registry = loadToolRegistry({
-      runtimeToolRegistry: effectiveRuntime.toolRegistry,
-    });
-    const builtinNames = new Set(Object.keys(createRuntimeEnvironment({}, {}).tools));
+    try {
+      const registry = loadToolRegistry({
+        runtimeToolRegistry: effectiveRuntime.toolRegistry,
+      });
+      const builtinNames = new Set(Object.keys(createRuntimeEnvironment({}, {}).tools));
 
-    if (!subcommand || subcommand === "list") {
-      const rows = [];
-      for (const [name, entry] of registry) {
-        const tag = builtinNames.has(name) ? "[builtin]" : "[registry]";
-        rows.push(`  ${name.padEnd(36)} ${tag.padEnd(12)} ${entry.description ?? ""}`);
-      }
-      // Include any builtins not yet in registry
-      for (const name of builtinNames) {
-        if (!registry.has(name)) {
-          rows.push(`  ${name.padEnd(36)} ${"[builtin]".padEnd(12)} (no registry entry)`);
+      if (!subcommand || subcommand === "list") {
+        const rows = [];
+        for (const [name, entry] of registry) {
+          const tag = builtinNames.has(name) ? "[builtin]" : "[registry]";
+          rows.push(`  ${name.padEnd(36)} ${tag.padEnd(12)} ${entry.description ?? ""}`);
         }
+        // Include any builtins not yet in registry
+        for (const name of builtinNames) {
+          if (!registry.has(name)) {
+            rows.push(`  ${name.padEnd(36)} ${"[builtin]".padEnd(12)} (no registry entry)`);
+          }
+        }
+        rows.sort();
+        console.log(rows.join("\n"));
+        return;
       }
-      rows.sort();
-      console.log(rows.join("\n"));
-      return;
-    }
 
-    if (subcommand === "inspect") {
-      const toolName = positional[1];
-      if (!toolName) {
-        throw new Error("Usage: runeflow tools inspect <tool-name>");
+      if (subcommand === "inspect") {
+        const toolName = positional[1];
+        if (!toolName) {
+          throw new Error("Usage: runeflow tools inspect <tool-name>");
+        }
+        const entry = registry.get(toolName);
+        if (!entry) {
+          throw new Error(`Tool '${toolName}' not found in registry. Run 'runeflow tools list' to see available tools.`);
+        }
+        console.log(JSON.stringify(entry, null, 2));
+        return;
       }
-      const entry = registry.get(toolName);
-      if (!entry) {
-        throw new Error(`Tool '${toolName}' not found in registry. Run 'runeflow tools list' to see available tools.`);
-      }
-      console.log(JSON.stringify(entry, null, 2));
-      return;
-    }
 
-    throw new Error(`Unknown tools subcommand '${subcommand}'. Use 'list' or 'inspect <name>'.`);
+      throw new Error(`Unknown tools subcommand '${subcommand}'. Use 'list' or 'inspect <name>'.`);
+    } finally {
+      await closeRuntimePlugins(effectiveRuntime).catch(() => {});
+    }
   }
 
   throw new Error(`Unknown command '${command}'.`);

@@ -6,6 +6,7 @@ export { parseRuneflow, parseSkill } from "./parser.js";
 export {
   ADAPTER_TOOL_RESULT_SCHEMA,
   collectRuntimeExtensions,
+  closeRuntimePlugins,
   createComposioClientPlugin,
   createMcpClientPlugin,
   createComposioToolPlugin,
