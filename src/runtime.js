@@ -7,7 +7,7 @@ import { resolveWorkflowBlocks } from "./blocks.js";
 import { checkAuth } from "./auth.js";
 import { RuntimeError, ValidationError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
-import { createRuntimeEnvironment } from "./runtime-plugins.js";
+import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
 import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
 import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
@@ -775,155 +775,159 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     workflow: resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }),
   };
   const effectiveRuntime = createRuntime(runtime, options);
-  const toolRegistry = loadToolRegistry({
-    ...options,
-    runtimeToolRegistry: effectiveRuntime.toolRegistry,
-  });
-  const validation = validateSkill(resolvedDefinition, {
-    ...options,
-    runtimeToolRegistry: effectiveRuntime.toolRegistry,
-  });
-  if (!validation.valid) {
-    throw new ValidationError("Skill validation failed.", validation.issues);
-  }
-
-  const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
-
-  // Auth pre-flight — only check providers not already handled by the runtime
-  // Skip entirely if runtime provides its own llms handlers
-  if (options.checkAuth !== false && Object.keys(effectiveRuntime.llms ?? {}).length === 0) {
-    const authErrors = checkAuth(resolvedDefinition, options);
-    if (authErrors.length) {
-      throw new ValidationError("Auth pre-flight failed.", authErrors);
-    }
-  }
-  const run = {
-    run_id: createRunId(),
-    runeflow: {
-      name: resolvedDefinition.metadata.name,
-      version: resolvedDefinition.metadata.version,
-    },
-    status: "running",
-    inputs: deepClone(inputs),
-    steps: [],
-    outputs: {},
-    started_at: new Date().toISOString(),
-    finished_at: null,
-    error: null,
-  };
-
-  const stepIndex = new Map(resolvedDefinition.workflow.steps.map((step, index) => [step.id, index]));
-  let index = 0;
-
-  while (index < resolvedDefinition.workflow.steps.length) {
-    const step = resolvedDefinition.workflow.steps[index];
-    const state = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
-    const result = step.kind === "parallel"
-      ? await executeParallelStep({
-        definition: resolvedDefinition,
-        step,
-        childSteps: resolvedDefinition.workflow.steps.slice(index + 1, index + 1 + step.steps.length),
-        state,
-        run,
-        runsDir,
-        effectiveRuntime,
-        toolRegistry,
-        options,
-      })
-      : await executeStep({
-        definition: resolvedDefinition,
-        step,
-        state,
-        runId: run.run_id,
-        runsDir,
-        effectiveRuntime,
-        toolRegistry,
-        options,
-      });
-
-    if (result.abortRun) {
-      failRun(run, result.abortRun.reason);
-      run.outputs = {};
-      run.artifact_path = await writeRunArtifact(run, runsDir);
-      return run;
+  try {
+    const toolRegistry = loadToolRegistry({
+      ...options,
+      runtimeToolRegistry: effectiveRuntime.toolRegistry,
+    });
+    const validation = validateSkill(resolvedDefinition, {
+      ...options,
+      runtimeToolRegistry: effectiveRuntime.toolRegistry,
+    });
+    if (!validation.valid) {
+      throw new ValidationError("Skill validation failed.", validation.issues);
     }
 
-    if (step.kind !== "parallel") {
-      run.steps.push(result.stepRun);
-    }
+    const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
 
-    if (result.waitingForInput) {
-      run.status = "halted_on_input";
-      run.halted_step_id = step.id;
-      run.pending_input = {
-        step_id: step.id,
-        prompt: result.waitingForInput.prompt,
-        choices: result.waitingForInput.choices ?? null,
-        default: result.waitingForInput.default,
-      };
-      run.error = null;
-      run.finished_at = new Date().toISOString();
-      run.outputs = {};
-      run.artifact_path = await writeRunArtifact(run, runsDir);
-      return run;
+    // Auth pre-flight — only check providers not already handled by the runtime
+    // Skip entirely if runtime provides its own llms handlers
+    if (options.checkAuth !== false && Object.keys(effectiveRuntime.llms ?? {}).length === 0) {
+      const authErrors = checkAuth(resolvedDefinition, options);
+      if (authErrors.length) {
+        throw new ValidationError("Auth pre-flight failed.", authErrors);
+      }
     }
+    const run = {
+      run_id: createRunId(),
+      runeflow: {
+        name: resolvedDefinition.metadata.name,
+        version: resolvedDefinition.metadata.version,
+      },
+      status: "running",
+      inputs: deepClone(inputs),
+      steps: [],
+      outputs: {},
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      error: null,
+    };
 
-    if (result.error) {
-      const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
-      if (!step.fallback || step.fallback === "fail") {
-        haltRun(run, step.id, resolvedFailMessage ?? result.error.message, result.error);
+    const stepIndex = new Map(resolvedDefinition.workflow.steps.map((step, index) => [step.id, index]));
+    let index = 0;
+
+    while (index < resolvedDefinition.workflow.steps.length) {
+      const step = resolvedDefinition.workflow.steps[index];
+      const state = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
+      const result = step.kind === "parallel"
+        ? await executeParallelStep({
+          definition: resolvedDefinition,
+          step,
+          childSteps: resolvedDefinition.workflow.steps.slice(index + 1, index + 1 + step.steps.length),
+          state,
+          run,
+          runsDir,
+          effectiveRuntime,
+          toolRegistry,
+          options,
+        })
+        : await executeStep({
+          definition: resolvedDefinition,
+          step,
+          state,
+          runId: run.run_id,
+          runsDir,
+          effectiveRuntime,
+          toolRegistry,
+          options,
+        });
+
+      if (result.abortRun) {
+        failRun(run, result.abortRun.reason);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
         return run;
       }
 
-      index = stepIndex.get(step.fallback);
-      continue;
-    }
+      if (step.kind !== "parallel") {
+        run.steps.push(result.stepRun);
+      }
 
-    if (step.kind === "branch") {
-      if (result.outputs.target === "fail") {
+      if (result.waitingForInput) {
+        run.status = "halted_on_input";
+        run.halted_step_id = step.id;
+        run.pending_input = {
+          step_id: step.id,
+          prompt: result.waitingForInput.prompt,
+          choices: result.waitingForInput.choices ?? null,
+          default: result.waitingForInput.default,
+        };
+        run.error = null;
+        run.finished_at = new Date().toISOString();
+        run.outputs = {};
+        run.artifact_path = await writeRunArtifact(run, runsDir);
+        return run;
+      }
+
+      if (result.error) {
         const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
-        failRun(run, resolvedFailMessage ?? `Branch '${step.id}' selected fail target.`);
+        if (!step.fallback || step.fallback === "fail") {
+          haltRun(run, step.id, resolvedFailMessage ?? result.error.message, result.error);
+          run.outputs = {};
+          run.artifact_path = await writeRunArtifact(run, runsDir);
+          return run;
+        }
+
+        index = stepIndex.get(step.fallback);
+        continue;
+      }
+
+      if (step.kind === "branch") {
+        if (result.outputs.target === "fail") {
+          const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
+          failRun(run, resolvedFailMessage ?? `Branch '${step.id}' selected fail target.`);
+          run.outputs = {};
+          run.artifact_path = await writeRunArtifact(run, runsDir);
+          return run;
+        }
+
+        index = stepIndex.get(result.outputs.target);
+        continue;
+      }
+
+      if (step.next === "fail") {
+        const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
+        failRun(run, resolvedFailMessage ?? `Step '${step.id}' terminated the run.`);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
         return run;
       }
 
-      index = stepIndex.get(result.outputs.target);
-      continue;
+      if (step.next) {
+        index = stepIndex.get(step.next);
+        continue;
+      }
+
+      index += step.kind === "parallel" ? step.steps.length + 1 : 1;
     }
 
-    if (step.next === "fail") {
-      const resolvedFailMessage = step.failMessage ? resolveBindings(step.failMessage, state) : null;
-      failRun(run, resolvedFailMessage ?? `Step '${step.id}' terminated the run.`);
+    const finalState = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
+
+    run.outputs = resolveBindings(resolvedDefinition.workflow.output, finalState);
+    const outputIssues = validateShape(run.outputs, resolvedDefinition.metadata.outputs, "outputs");
+    if (outputIssues.length) {
+      failRun(run, `Final outputs failed validation: ${outputIssues.join("; ")}`);
       run.outputs = {};
-      run.artifact_path = await writeRunArtifact(run, runsDir);
-      return run;
+    } else {
+      run.status = "success";
+      run.finished_at = new Date().toISOString();
     }
 
-    if (step.next) {
-      index = stepIndex.get(step.next);
-      continue;
-    }
-
-    index += step.kind === "parallel" ? step.steps.length + 1 : 1;
+    run.artifact_path = await writeRunArtifact(run, runsDir);
+    return run;
+  } finally {
+    await closeRuntimePlugins(effectiveRuntime).catch(() => {});
   }
-
-  const finalState = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
-
-  run.outputs = resolveBindings(resolvedDefinition.workflow.output, finalState);
-  const outputIssues = validateShape(run.outputs, resolvedDefinition.metadata.outputs, "outputs");
-  if (outputIssues.length) {
-    failRun(run, `Final outputs failed validation: ${outputIssues.join("; ")}`);
-    run.outputs = {};
-  } else {
-    run.status = "success";
-    run.finished_at = new Date().toISOString();
-  }
-
-  run.artifact_path = await writeRunArtifact(run, runsDir);
-  return run;
 }
 
 export const runRuneflow = runSkill;

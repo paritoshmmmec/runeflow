@@ -12,7 +12,7 @@
  */
 import { RuntimeError } from "./errors.js";
 import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
-import { createRuntimeEnvironment } from "./runtime-plugins.js";
+import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
 import { isPlainObject, deepClone } from "./utils.js";
 
 // ─── Binding resolution (mirrors runtime.js, no artifact writing) ─────────────
@@ -205,33 +205,37 @@ function renderAssembled({ definition, targetStep, resolvedPrompt, resolvedInput
  * @returns {Promise<string>}  - assembled Markdown
  */
 export async function assembleRuneflow(definition, stepId, inputs = {}, runtime = {}, options = {}) {
-  const tools = createRuntimeEnvironment(runtime, options).tools;
+  const environment = createRuntimeEnvironment(runtime, options);
 
-  const completedSteps = await executePreSteps(definition, stepId, inputs, tools);
+  try {
+    const completedSteps = await executePreSteps(definition, stepId, inputs, environment.tools);
 
-  const steps = definition.workflow.steps;
-  const targetStep = steps.find((s) => s.id === stepId);
+    const steps = definition.workflow.steps;
+    const targetStep = steps.find((s) => s.id === stepId);
 
-  const state = {
-    inputs,
-    stepMap: buildStepState(completedSteps),
-    consts: definition.consts ?? {},
-  };
+    const state = {
+      inputs,
+      stepMap: buildStepState(completedSteps),
+      consts: definition.consts ?? {},
+    };
 
-  const resolvedPrompt = resolveBindings(targetStep.prompt, state);
-  const resolvedInput = resolveBindings(targetStep.input ?? {}, state);
+    const resolvedPrompt = resolveBindings(targetStep.prompt, state);
+    const resolvedInput = resolveBindings(targetStep.input ?? {}, state);
 
-  const docs = targetStep.docs
-    ? (definition.docBlocks?.[targetStep.docs] ?? definition.docs)
-    : definition.docs;
+    const docs = targetStep.docs
+      ? (definition.docBlocks?.[targetStep.docs] ?? definition.docs)
+      : definition.docs;
 
-  return renderAssembled({
-    definition,
-    targetStep,
-    resolvedPrompt,
-    resolvedInput,
-    docs,
-  });
+    return renderAssembled({
+      definition,
+      targetStep,
+      resolvedPrompt,
+      resolvedInput,
+      docs,
+    });
+  } finally {
+    await closeRuntimePlugins(environment).catch(() => {});
+  }
 }
 
 export const assembleSkill = assembleRuneflow;

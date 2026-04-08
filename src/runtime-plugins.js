@@ -256,7 +256,7 @@ function createMcpClient(clientInfo = { name: "runeflow", version: "0.1.0" }) {
 }
 
 function createManagedMcpSession(server, options = {}) {
-  const idleTimeoutMs = options.idleTimeoutMs ?? 50;
+  const idleTimeoutMs = options.idleTimeoutMs;
   let client = null;
   let transport = null;
   let connectPromise = null;
@@ -286,7 +286,6 @@ function createManagedMcpSession(server, options = {}) {
 
     if (closingClient?.close) {
       await closingClient.close().catch(() => {});
-      return;
     }
 
     if (closingTransport?.close) {
@@ -295,6 +294,10 @@ function createManagedMcpSession(server, options = {}) {
   };
 
   const scheduleIdleClose = () => {
+    if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs < 0) {
+      return;
+    }
+
     cancelIdleClose();
     idleTimer = setTimeout(() => {
       idleTimer = null;
