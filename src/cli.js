@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
+import chokidar from "chokidar";
+import cron from "node-cron";
 import { assembleRuneflow } from "./assembler.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { runInit } from "./init.js";
@@ -91,7 +94,10 @@ async function findLatestHaltedRun(skillName, runsDir) {
   for (const file of runFiles) {
     const raw = await fs.readFile(path.join(runsDir, file), "utf8");
     const artifact = JSON.parse(raw);
-    if (artifact.runeflow?.name === skillName && artifact.status === "halted_on_error") {
+    if (
+      artifact.runeflow?.name === skillName
+      && (artifact.status === "halted_on_error" || artifact.status === "halted_on_input")
+    ) {
       return artifact;
     }
   }
@@ -116,6 +122,73 @@ async function loadPriorSteps(runArtifact, runsDir) {
   return priorSteps;
 }
 
+function createPromptSession() {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return {
+      promptHandler: undefined,
+      close: () => {},
+    };
+  }
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return {
+    promptHandler: async ({ step, prompt, choices, defaultValue }) => {
+      const choiceSuffix = Array.isArray(choices) && choices.length
+        ? ` [${choices.join("/")}]`
+        : "";
+      const defaultSuffix = defaultValue !== undefined
+        ? ` (default: ${typeof defaultValue === "string" ? defaultValue : JSON.stringify(defaultValue)})`
+        : "";
+
+      while (true) {
+        const answer = await rl.question(`${prompt}${choiceSuffix}${defaultSuffix}\n> `);
+
+        if (!answer && defaultValue !== undefined) {
+          return defaultValue;
+        }
+
+        if (!Array.isArray(choices) || choices.length === 0 || choices.includes(answer)) {
+          return answer;
+        }
+
+        console.error(
+          `Invalid answer for '${step.id}'. Expected one of: ${choices.join(", ")}`,
+        );
+      }
+    },
+    close: () => rl.close(),
+  };
+}
+
+async function executeRun(target, options = {}) {
+  const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
+  const definition = parseRuneflow(source, { sourcePath: target });
+  const runtime = await loadRuntime(options.runtime);
+  const input = await loadInput(options.input);
+  const promptValues = await loadInput(options.prompt);
+  const runsDir = options["runs-dir"] ? path.resolve(process.cwd(), options["runs-dir"]) : undefined;
+  const promptSession = options.interactivePrompts === false
+    ? { promptHandler: undefined, close: () => {} }
+    : createPromptSession();
+
+  try {
+    const run = await runRuneflow(definition, input, runtime, {
+      runsDir,
+      force: Boolean(options.force),
+      promptValues,
+      promptHandler: promptSession.promptHandler,
+    });
+
+    return { definition, run, runsDir };
+  } finally {
+    promptSession.close();
+  }
+}
+
 export async function runCli(argv) {
   const [command, ...rest] = argv;
   const { positional, options } = parseOptions(rest);
@@ -125,7 +198,8 @@ export async function runCli(argv) {
   runeflow init [--name <name>] [--provider <provider>]
   runeflow validate <file>
   runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force]
-  runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
+  runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
+  runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
   runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
   runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow import <file> [--output converted.runeflow.md]
@@ -159,14 +233,7 @@ export async function runCli(argv) {
 
   if (command === "run") {
     const target = positional[0];
-    const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
-    const definition = parseRuneflow(source, { sourcePath: target });
-    const runtime = await loadRuntime(options.runtime);
-    const input = await loadInput(options.input);
-    const run = await runRuneflow(definition, input, runtime, {
-      runsDir: options["runs-dir"] ? path.resolve(process.cwd(), options["runs-dir"]) : undefined,
-      force: Boolean(options.force),
-    });
+    const { run } = await executeRun(target, options);
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {
       process.exitCode = 1;
@@ -198,11 +265,20 @@ export async function runCli(argv) {
 
     const priorSteps = await loadPriorSteps(priorRun, runsDir);
     const runtime = await loadRuntime(options.runtime);
-    const run = await runRuneflow(definition, priorRun.inputs, runtime, {
-      runsDir,
-      priorSteps,
-      resumeFromStep: priorRun.halted_step_id,
-    });
+    const promptValues = await loadInput(options.prompt);
+    const promptSession = createPromptSession();
+    let run;
+    try {
+      run = await runRuneflow(definition, priorRun.inputs, runtime, {
+        runsDir,
+        priorSteps,
+        resumeFromStep: priorRun.halted_step_id,
+        promptValues,
+        promptHandler: promptSession.promptHandler,
+      });
+    } finally {
+      promptSession.close();
+    }
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {
       process.exitCode = 1;
@@ -229,6 +305,127 @@ export async function runCli(argv) {
     } else {
       console.log(assembled);
     }
+    return;
+  }
+
+  if (command === "watch") {
+    const target = positional[0];
+    const cronExpr = options.cron;
+    const watchPattern = options["on-change"];
+
+    if (!target) {
+      throw new Error("Usage: runeflow watch <file> [--cron '<expr>'] [--on-change '<glob>']");
+    }
+
+    if (!cronExpr && !watchPattern) {
+      throw new Error("runeflow watch requires --cron or --on-change");
+    }
+
+    let running = false;
+    let pendingTrigger = null;
+    let shuttingDown = false;
+
+    const scheduleRun = async (trigger) => {
+      if (running) {
+        pendingTrigger = trigger;
+        return;
+      }
+
+      running = true;
+
+      try {
+        const { run } = await executeRun(target, {
+          ...options,
+          interactivePrompts: false,
+        });
+
+        console.log(JSON.stringify({
+          event: "watch.run",
+          trigger,
+          status: run.status,
+          run_id: run.run_id,
+          artifact_path: run.artifact_path,
+        }, null, 2));
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "watch.error",
+          trigger,
+          error: {
+            name: error.name,
+            message: error.message,
+          },
+        }, null, 2));
+      } finally {
+        running = false;
+        if (pendingTrigger && !shuttingDown) {
+          const nextTrigger = pendingTrigger;
+          pendingTrigger = null;
+          await scheduleRun(nextTrigger);
+        }
+      }
+    };
+
+    const resources = [];
+
+    if (cronExpr) {
+      if (!cron.validate(cronExpr)) {
+        throw new Error(`Invalid cron expression '${cronExpr}'`);
+      }
+
+      const task = cron.schedule(cronExpr, () => {
+        void scheduleRun({
+          type: "cron",
+          cron: cronExpr,
+          at: new Date().toISOString(),
+        });
+      });
+      resources.push(() => task.stop());
+    }
+
+    if (watchPattern) {
+      const patterns = watchPattern.split(",").map((value) => value.trim()).filter(Boolean);
+      const watcher = chokidar.watch(patterns, {
+        ignoreInitial: true,
+        awaitWriteFinish: {
+          stabilityThreshold: 200,
+          pollInterval: 100,
+        },
+      });
+
+      watcher.on("all", (event, changedPath) => {
+        void scheduleRun({
+          type: "change",
+          event,
+          path: changedPath,
+          at: new Date().toISOString(),
+        });
+      });
+
+      resources.push(() => watcher.close());
+    }
+
+    console.log(JSON.stringify({
+      event: "watch.started",
+      target,
+      cron: cronExpr ?? null,
+      on_change: watchPattern ?? null,
+    }, null, 2));
+
+    await new Promise((resolve) => {
+      const cleanup = async () => {
+        shuttingDown = true;
+        await Promise.all(resources.map((close) => close()));
+        resolve();
+      };
+
+      process.once("SIGINT", () => {
+        void cleanup();
+      });
+      process.once("SIGTERM", () => {
+        void cleanup();
+      });
+    });
+
     return;
   }
 

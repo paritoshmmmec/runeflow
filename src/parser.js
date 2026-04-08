@@ -234,6 +234,30 @@ function parseBranch(header, body) {
   };
 }
 
+function parseParallel(header, body) {
+  const match = header.match(/^parallel\s+([A-Za-z_][A-Za-z0-9_-]*)(?:\s+(.*))?$/);
+
+  if (!match) {
+    throw new SkillSyntaxError(`Invalid parallel declaration '${header}'.`);
+  }
+
+  const [, id, attributesSource = ""] = match;
+  const attributes = parseHeaderAttributes(attributesSource);
+  const properties = parseBlockProperties(body);
+
+  const parallel = {
+    id,
+    kind: "parallel",
+    retry: attributes.retry ? Number(attributes.retry) : 0,
+    fallback: attributes.fallback ?? null,
+    next: properties.next ?? attributes.next ?? null,
+    failMessage: properties.fail_message ?? null,
+    ...properties,
+  };
+  if (attributes.cache === "false") parallel.cache = false;
+  return parallel;
+}
+
 function parseOutputBlock(body) {
   return parseBlockProperties(body);
 }
@@ -275,6 +299,8 @@ function parseWorkflow(workflowSource) {
       steps.push(parseStep(header, body));
     } else if (header.startsWith("branch ")) {
       steps.push(parseBranch(header, body));
+    } else if (header.startsWith("parallel ")) {
+      steps.push(parseParallel(header, body));
     } else if (header.startsWith("block ")) {
       blocks.push(parseBlockTemplate(header, body));
     } else if (header === "output") {

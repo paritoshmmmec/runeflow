@@ -467,3 +467,142 @@ output {
   assert.equal(result.valid, false);
   assert.ok(result.issues.some((i) => i.includes("nonexistent")));
 });
+
+test("validateRuneflow accepts a valid parallel tool block", () => {
+  const parsed = parseRuneflow(`---
+name: parallel-valid
+description: Valid parallel block
+version: 0.1
+inputs: {}
+outputs:
+  results:
+    - any
+  first: string
+---
+
+\`\`\`runeflow
+parallel gather {
+  steps: [fetch_one, fetch_two]
+}
+
+step fetch_one type=tool {
+  tool: mock.one
+  out: { value: string }
+}
+
+step fetch_two type=tool {
+  tool: mock.two
+  out: { value: string }
+}
+
+output {
+  results: steps.gather.results
+  first: steps.gather.by_step.fetch_one.value
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("validateRuneflow rejects invalid parallel child wiring", () => {
+  const parsed = parseRuneflow(`---
+name: parallel-invalid
+description: Invalid parallel block
+version: 0.1
+inputs: {}
+outputs:
+  value: string
+---
+
+\`\`\`runeflow
+parallel gather {
+  steps: [fetch_one, fetch_two]
+  out: { results: [any] }
+}
+
+step fetch_one type=tool {
+  tool: mock.one
+  with: { value: steps.fetch_two.value }
+  out: { value: string }
+}
+
+step fetch_two type=tool {
+  tool: mock.two
+  next: finish
+  out: { value: string }
+}
+
+step finish type=tool {
+  tool: mock.finish
+  with: { value: steps.fetch_one.value }
+  out: { value: string }
+}
+
+output {
+  value: steps.finish.value
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.match(result.issues.join("\n"), /may not declare next/);
+  assert.match(result.issues.join("\n"), /may not reference sibling step 'fetch_two'/);
+});
+
+test("validateRuneflow accepts a valid human_input step", () => {
+  const parsed = parseRuneflow(`---
+name: input-valid
+description: Valid human input
+version: 0.1
+inputs: {}
+outputs:
+  answer: string
+---
+
+\`\`\`runeflow
+step confirm type=human_input {
+  prompt: "Deploy?"
+  choices: ["yes", "no"]
+}
+
+output {
+  answer: steps.confirm.answer
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("validateRuneflow rejects invalid human_input choices", () => {
+  const parsed = parseRuneflow(`---
+name: input-invalid
+description: Invalid human input
+version: 0.1
+inputs: {}
+outputs:
+  answer: string
+---
+
+\`\`\`runeflow
+step confirm type=human_input {
+  prompt: "Deploy?"
+  choices: []
+}
+
+output {
+  answer: steps.confirm.answer
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.match(result.issues.join("\n"), /choices must be a non-empty array/);
+});

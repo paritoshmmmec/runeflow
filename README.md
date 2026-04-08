@@ -229,8 +229,10 @@ output {
 | Kind | What it does |
 |---|---|
 | `tool` | Calls a registered tool, validates output against `out` schema |
+| `parallel` | Runs a contiguous group of `tool` steps concurrently, joins their outputs |
 | `llm` | Calls an LLM handler, validates output against `schema` |
 | `cli` | Runs a shell command, captures `stdout`, `stderr`, `exit_code` |
+| `human_input` | Collects an answer from `--prompt`, a prompt handler, or halts for resume |
 | `transform` | Runs a JS expression over resolved `input`, validates against `out` |
 | `branch` | Evaluates an expression, routes to `then` or `else` step |
 | `block` | Instantiates a defined `block` template with overriding properties |
@@ -246,6 +248,27 @@ step check type=tool {
   out: { exists: boolean }
 }
 ```
+
+### parallel
+
+```runeflow
+parallel gather {
+  steps: [fetch_slack, fetch_drive]
+  out: { results: [any] }
+}
+
+step fetch_slack type=tool {
+  tool: slack.fetch
+  out: { items: [string] }
+}
+
+step fetch_drive type=tool {
+  tool: drive.fetch
+  out: { items: [string] }
+}
+```
+
+`parallel` only fans out `tool` steps. Child tool steps must be declared immediately after the `parallel` block in the same order, and they may not reference each other.
 
 ### llm
 
@@ -287,6 +310,17 @@ step create_pr type=cli cache=false {
 ```
 
 Non-zero exit code halts the run by default. Add `allow_failure: true` to capture it instead.
+
+### human_input
+
+```runeflow
+step confirm type=human_input {
+  prompt: "Deploy to production?"
+  choices: ["yes", "no"]
+}
+```
+
+Provide answers up front with `--prompt '{"confirm":"yes"}'`, or let the runtime halt with `halted_on_input` and continue later with `runeflow resume`.
 
 ### block
 
@@ -350,7 +384,8 @@ runeflow tools inspect git.diff_summary
 runeflow init [--name <name>] [--provider <provider>]
 runeflow validate <file>
 runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
-runeflow resume <file> [--runtime ./runtime.js]
+runeflow resume <file> [--runtime ./runtime.js] [--prompt '{"step":"answer"}']
+runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
 runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
 runeflow inspect-run <run-id>
 runeflow import <file> [--output converted.runeflow.md]
@@ -358,7 +393,9 @@ runeflow tools list
 runeflow tools inspect <tool-name>
 ```
 
-`resume` reads the most recent `halted_on_error` run, replays completed steps from cache, and retries from the failure point.
+`resume` reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
+
+`watch` runs a skill on a cron schedule, on file changes, or both. It reuses the normal `run` path, so artifacts, prompts, validation, and runtime loading behave the same way.
 
 `assemble` runs all tool/transform steps before a target `llm` step, resolves the prompt with real values, and writes a clean Markdown context file for an agent (Claude Code, Codex, Cursor) to load instead of the raw skill.
 
@@ -472,9 +509,11 @@ The runtime validates tool inputs against `inputSchema` and outputs against `out
 
 Every run writes `.runeflow-runs/<run_id>.json` and per-step artifacts. Includes inputs, outputs, status, timing, and errors.
 
-Run statuses: `running` → `success` | `halted_on_error` | `failed`
+Run statuses: `running` → `success` | `halted_on_error` | `halted_on_input` | `failed`
 
 `halted_on_error` means a step failed with no fallback. The artifact includes `halted_step_id` so `runeflow resume` knows where to restart.
+
+`halted_on_input` means a `human_input` step needs an answer. The run artifact includes `pending_input` with the resolved prompt and choices.
 
 ---
 
@@ -504,7 +543,7 @@ step push type=tool cache=false {
 | Phase | Status | What |
 |---|---|---|
 | v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
-| v0.2 | 🔜 next | `human_input` step (design TBD), `runeflow watch`, parallel tool steps |
+| v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps |
 | v0.3 | 📅 planned | MCP server, `runeflow build` (LLM → skill compiler), agent integration |
 
 ---
