@@ -29,7 +29,6 @@
     "eval:release-notes": "node --env-file=.env ./eval/release-notes.js"
   },
   "dependencies": {
-    "@composio/core": "^0.6.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^6.0.149",
     "chokidar": "^5.0.0",
@@ -44,26 +43,16 @@
     "@ai-sdk/google": ">=1.0.0",
     "@ai-sdk/groq": ">=1.0.0",
     "@ai-sdk/mistral": ">=1.0.0",
-    "@ai-sdk/openai": ">=1.0.0"
+    "@ai-sdk/openai": ">=1.0.0",
+    "@composio/core": ">=0.6.0"
   },
   "peerDependenciesMeta": {
-    "@ai-sdk/anthropic": {
-      "optional": true
-    },
-    "@ai-sdk/cerebras": {
-      "optional": true
-    },
-    "@ai-sdk/google": {
-      "optional": true
-    },
-    "@ai-sdk/groq": {
-      "optional": true
-    },
-    "@ai-sdk/mistral": {
-      "optional": true
-    },
-    "@ai-sdk/openai": {
-      "optional": true
-    }
+    "@ai-sdk/anthropic": { "optional": true },
+    "@ai-sdk/cerebras": { "optional": true },
+    "@ai-sdk/google": { "optional": true },
+    "@ai-sdk/groq": { "optional": true },
+    "@ai-sdk/mistral": { "optional": true },
+    "@ai-sdk/openai": { "optional": true },
+    "@composio/core": { "optional": true }
   }
 }
