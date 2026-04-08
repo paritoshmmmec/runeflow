@@ -17,6 +17,7 @@ const PROVIDER_KEY_MAP = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   cerebras: "CEREBRAS_API_KEY",
+  composio: "COMPOSIO_API_KEY",
   ollama: null, // local, no auth needed
 };
 

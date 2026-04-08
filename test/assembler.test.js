@@ -216,6 +216,29 @@ test("assembleRuneflow: throws when a pre-step tool is not registered", async ()
   );
 });
 
+test("assembleRuneflow: supports plugin-contributed tools", async () => {
+  const runtime = {
+    plugins: [
+      {
+        name: "plugin-tools",
+        tools: {
+          "plugin.branch": async () => ({ branch: "feat/plugin" }),
+          "plugin.diff": async ({ base }) => ({ summary: `plugin diff vs ${base}` }),
+        },
+      },
+    ],
+  };
+
+  const pluginDefinition = parseRuneflow(BASE_SKILL
+    .replaceAll("mock.branch", "plugin.branch")
+    .replaceAll("mock.diff", "plugin.diff"));
+
+  const result = await assembleRuneflow(pluginDefinition, "draft", { base_branch: "main" }, runtime);
+
+  assert.ok(result.includes("feat/plugin"));
+  assert.ok(result.includes("plugin diff vs main"));
+});
+
 test("assembleRuneflow: output contains skill name and step id in header", async () => {
   const definition = parseRuneflow(BASE_SKILL);
   const runtime = {

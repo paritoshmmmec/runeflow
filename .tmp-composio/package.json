@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@composio/core": "^0.6.8"
+  }
+}

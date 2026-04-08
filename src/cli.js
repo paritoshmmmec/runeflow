@@ -8,10 +8,10 @@ import { assembleRuneflow } from "./assembler.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { runInit } from "./init.js";
 import { parseRuneflow } from "./parser.js";
+import { createRuntimeEnvironment } from "./runtime-plugins.js";
 import { runRuneflow } from "./runtime.js";
 import { loadToolRegistry } from "./tool-registry.js";
 import { validateRuneflow } from "./validator.js";
-import { createBuiltinTools } from "./builtins.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
 const LEGACY_RUNS_DIR = ".skill-runs";
@@ -50,7 +50,7 @@ async function loadRuntime(runtimePath) {
 
   const absolutePath = path.resolve(process.cwd(), runtimePath);
   const module = await import(pathToFileURL(absolutePath).href);
-  return module.default ?? module;
+  return await (module.default ?? module);
 }
 
 async function loadInput(rawInput) {
@@ -196,15 +196,15 @@ export async function runCli(argv) {
   if (!command || command === "help" || command === "--help") {
     console.log(`Usage:
   runeflow init [--name <name>] [--provider <provider>]
-  runeflow validate <file>
+  runeflow validate <file> [--runtime ./runtime.js]
   runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
   runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
   runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
   runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow import <file> [--output converted.runeflow.md]
-  runeflow tools list
-  runeflow tools inspect <tool-name>`);
+  runeflow tools list [--runtime ./runtime.js]
+  runeflow tools inspect <tool-name> [--runtime ./runtime.js]`);
     return;
   }
 
@@ -223,7 +223,11 @@ export async function runCli(argv) {
     const target = positional[0];
     const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
     const definition = parseRuneflow(source, { sourcePath: target });
-    const validation = validateRuneflow(definition);
+    const runtime = await loadRuntime(options.runtime);
+    const effectiveRuntime = createRuntimeEnvironment(runtime, {});
+    const validation = validateRuneflow(definition, {
+      runtimeToolRegistry: effectiveRuntime.toolRegistry,
+    });
     console.log(JSON.stringify(validation, null, 2));
     if (!validation.valid) {
       process.exitCode = 1;
@@ -444,9 +448,12 @@ export async function runCli(argv) {
 
   if (command === "tools") {
     const subcommand = positional[0];
-    const registry = loadToolRegistry();
-    // Merge builtin tool names so we can cross-reference descriptions from registry
-    const builtinNames = new Set(Object.keys(createBuiltinTools()));
+    const runtime = await loadRuntime(options.runtime);
+    const effectiveRuntime = createRuntimeEnvironment(runtime, {});
+    const registry = loadToolRegistry({
+      runtimeToolRegistry: effectiveRuntime.toolRegistry,
+    });
+    const builtinNames = new Set(Object.keys(createRuntimeEnvironment({}, {}).tools));
 
     if (!subcommand || subcommand === "list") {
       const rows = [];

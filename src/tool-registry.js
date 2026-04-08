@@ -73,11 +73,15 @@ export function normalizeToolRegistry(registry) {
   throw new Error("toolRegistry must be a Map, array, or object");
 }
 
-export function loadToolRegistry(options = {}) {
-  if (options.toolRegistry) {
-    return normalizeToolRegistry(options.toolRegistry);
-  }
+export function mergeToolRegistries(...registries) {
+  return new Map(
+    registries
+      .filter(Boolean)
+      .flatMap((registry) => [...normalizeToolRegistry(registry).entries()]),
+  );
+}
 
+export function loadBaseToolRegistry(options = {}) {
   // 1. Load built-in registry (always available, resolved from package root)
   const builtinRegistry = loadDirRegistry(PACKAGE_REGISTRY_DIR);
 
@@ -90,6 +94,14 @@ export function loadToolRegistry(options = {}) {
 
   // Merge: built-ins first, user entries override
   return new Map([...builtinRegistry, ...userRegistry]);
+}
+
+export function loadToolRegistry(options = {}) {
+  return mergeToolRegistries(
+    loadBaseToolRegistry(options),
+    options.runtimeToolRegistry,
+    options.toolRegistry,
+  );
 }
 
 export function getToolOutputSchema(toolName, registry) {

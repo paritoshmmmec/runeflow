@@ -4,6 +4,12 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseRuneflow } from "../src/parser.js";
+import {
+  createComposioClientPlugin,
+  createComposioToolPlugin,
+  createMcpClientPlugin,
+  createMcpToolPlugin,
+} from "../src/runtime-plugins.js";
 import { runRuneflow } from "../src/runtime.js";
 
 test("runRuneflow executes linear tool -> llm -> tool workflow and writes artifacts", async () => {
@@ -388,6 +394,334 @@ output {
 
   assert.equal(run.status, "success");
   assert.equal(run.outputs.message, "overridden");
+});
+
+test("runRuneflow accepts plugin-contributed tools and schemas", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-plugin-tools-"));
+  const parsed = parseRuneflow(`---
+name: plugin-tool
+description: Plugin-backed tool
+version: 0.1
+inputs:
+  message: string
+outputs:
+  message: string
+---
+
+\`\`\`runeflow
+step echo type=tool {
+  tool: plugin.echo
+  with: { message: inputs.message }
+}
+
+output {
+  message: steps.echo.message
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(
+    parsed,
+    { message: "hello" },
+    {
+      plugins: [
+        {
+          name: "custom-plugin",
+          tools: {
+            "plugin.echo": async ({ message }) => ({ message: `${message}:plugin` }),
+          },
+          toolRegistry: [
+            {
+              name: "plugin.echo",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                },
+                required: ["message"],
+              },
+              outputSchema: {
+                type: "object",
+                properties: {
+                  message: { type: "string" },
+                },
+                required: ["message"],
+              },
+            },
+          ],
+        },
+      ],
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.message, "hello:plugin");
+});
+
+test("runRuneflow executes MCP adapter tools through the plugin layer", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-mcp-plugin-"));
+  const parsed = parseRuneflow(`---
+name: mcp-plugin
+description: MCP plugin
+version: 0.1
+inputs:
+  query: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step search type=tool {
+  tool: mcp.docs.search
+  with: { query: inputs.query }
+}
+
+output {
+  ok: steps.search.isError == false
+}
+\`\`\`
+`);
+
+  const calls = [];
+  const run = await runRuneflow(
+    parsed,
+    { query: "runeflow" },
+    {
+      plugins: [
+        createMcpToolPlugin({
+          serverName: "docs",
+          tools: [
+            {
+              name: "search",
+              description: "Search docs",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  query: { type: "string" },
+                },
+                required: ["query"],
+              },
+            },
+          ],
+          callTool: async ({ server, name, input }) => {
+            calls.push({ server, name, input });
+            return {
+              content: [{ text: `match:${input.query}` }],
+              isError: false,
+            };
+          },
+        }),
+      ],
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.ok, true);
+  assert.deepEqual(calls, [{
+    server: "docs",
+    name: "search",
+    input: { query: "runeflow" },
+  }]);
+});
+
+test("runRuneflow executes Composio adapter tools through the plugin layer", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-composio-plugin-"));
+  const parsed = parseRuneflow(`---
+name: composio-plugin
+description: Composio plugin
+version: 0.1
+inputs:
+  title: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step create_issue type=tool {
+  tool: composio.linear.create_issue
+  with: { title: inputs.title }
+}
+
+output {
+  ok: steps.create_issue.isError == false
+}
+\`\`\`
+`);
+
+  const calls = [];
+  const run = await runRuneflow(
+    parsed,
+    { title: "Investigate bug" },
+    {
+      plugins: [
+        createComposioToolPlugin({
+          tools: [
+            {
+              name: "linear.create_issue",
+              description: "Create a Linear issue",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                },
+                required: ["title"],
+              },
+            },
+          ],
+          executeTool: async ({ name, input }) => {
+            calls.push({ name, input });
+            return {
+              content: [{ id: "ISSUE-123" }],
+              isError: false,
+            };
+          },
+        }),
+      ],
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.ok, true);
+  assert.deepEqual(calls, [{
+    name: "linear.create_issue",
+    input: { title: "Investigate bug" },
+  }]);
+});
+
+test("runRuneflow executes a discovered Composio client plugin end to end", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-composio-client-"));
+  const parsed = parseRuneflow(`---
+name: composio-client-plugin
+description: Composio client plugin
+version: 0.1
+inputs:
+  title: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step create_issue type=tool {
+  tool: composio.linear.create_issue
+  with: { title: inputs.title }
+}
+
+output {
+  ok: steps.create_issue.isError == false
+}
+\`\`\`
+`);
+
+  const queries = [];
+  const calls = [];
+  const plugin = await createComposioClientPlugin({
+    toolkits: ["linear"],
+    executeDefaults: {
+      connectedAccountId: "acct_123",
+    },
+    createClient: async () => ({
+      tools: {
+        getRawComposioTools: async (query) => {
+          queries.push(query);
+          return {
+            items: [
+              {
+                slug: "LINEAR_CREATE_ISSUE",
+                toolkit: { slug: "linear" },
+                description: "Create a Linear issue",
+                inputParameters: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string", minLength: 1 },
+                  },
+                  required: ["title"],
+                  $schema: "http://json-schema.org/draft-07/schema#",
+                },
+              },
+            ],
+          };
+        },
+        execute: async (name, request) => {
+          calls.push({ name, request });
+          return {
+            id: "ISSUE-123",
+            title: request.arguments.title,
+          };
+        },
+      },
+    }),
+  });
+
+  const run = await runRuneflow(
+    parsed,
+    { title: "Investigate bug" },
+    {
+      plugins: [plugin],
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.ok, true);
+  assert.deepEqual(queries, [{
+    toolkits: ["linear"],
+  }]);
+  assert.deepEqual(calls, [{
+    name: "LINEAR_CREATE_ISSUE",
+    request: {
+      connectedAccountId: "acct_123",
+      arguments: { title: "Investigate bug" },
+    },
+  }]);
+  assert.equal(run.steps[0].outputs.raw.id, "ISSUE-123");
+});
+
+test("runRuneflow executes a real MCP stdio plugin end to end", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-mcp-stdio-"));
+  const parsed = parseRuneflow(`---
+name: real-mcp-plugin
+description: Real MCP plugin
+version: 0.1
+inputs:
+  query: string
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+step search type=tool {
+  tool: mcp.fixture.search
+  with: { query: inputs.query }
+}
+
+output {
+  ok: steps.search.isError == false
+}
+\`\`\`
+`);
+
+  const plugin = await createMcpClientPlugin({
+    serverName: "fixture",
+    command: process.execPath,
+    args: [path.resolve("fixtures/mcp-test-server.js")],
+    stderr: "pipe",
+  });
+
+  const run = await runRuneflow(
+    parsed,
+    { query: "runeflow" },
+    {
+      plugins: [plugin],
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.ok, true);
+  assert.equal(run.steps[0].outputs.content[0].text, "match:runeflow");
 });
 
 test("runRuneflow uses step-level llm override over metadata default", async () => {
