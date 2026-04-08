@@ -623,6 +623,33 @@ async function executeParallelStep({
   toolRegistry,
   options,
 }) {
+  if (step.skip_if && evaluateExpression(step.skip_if, state)) {
+    const skippedRun = await finalizeStepRun({
+      definition,
+      step,
+      state,
+      effectiveRuntime,
+      runId: run.run_id,
+      runsDir,
+      useHooks: true,
+      stepRun: {
+        id: step.id,
+        kind: step.kind,
+        status: "skipped",
+        attempts: 0,
+        inputs: {},
+        outputs: null,
+        error: null,
+        hook_events: [],
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+      },
+    });
+
+    run.steps.push(skippedRun);
+    return { stepRun: skippedRun, outputs: null, error: null };
+  }
+
   const hookEvents = [];
   const beforeResult = await callHook(effectiveRuntime.hooks?.beforeStep, {
     runId: run.run_id,
@@ -639,52 +666,54 @@ async function executeParallelStep({
   }
 
   const startedAt = new Date().toISOString();
-  const childResults = await Promise.all(childSteps.map((childStep) => executeStep({
-    definition,
-    step: childStep,
-    state,
-    runId: run.run_id,
-    runsDir,
-    effectiveRuntime,
-    toolRegistry,
-    options,
-    useHooks: false,
-  })));
-
-  for (const childResult of childResults) {
-    if (childResult.abortRun) {
-      return childResult;
-    }
-  }
-
-  const childStepRuns = childResults.map((result) => result.stepRun);
-  run.steps.push(...childStepRuns);
-
-  const failedChildren = childResults.filter((result) => result.error);
-  const inputsByStep = Object.fromEntries(childStepRuns.map((stepRun) => [stepRun.id, stepRun.inputs]));
-  const outputsByStep = Object.fromEntries(childStepRuns.map((stepRun) => [stepRun.id, stepRun.outputs]));
-  const finalOutputs = {
-    results: childStepRuns.map((stepRun) => stepRun.outputs),
-    by_step: outputsByStep,
-    step_ids: childStepRuns.map((stepRun) => stepRun.id),
-  };
-
+  let attempts = 0;
   let lastError = null;
-  if (failedChildren.length) {
-    lastError = new RuntimeError(
-      `parallel '${step.id}' failed: ${failedChildren
-        .map((result) => `${result.stepRun.id}: ${result.error.message}`)
-        .join("; ")}`,
-    );
+  let childResults = [];
+  let childStepRuns = [];
+  let inputsByStep = {};
+  let finalOutputs = null;
 
-    await callHook(effectiveRuntime.hooks?.onStepError, {
-      runId: run.run_id,
-      step,
-      error: serializeError(lastError),
-      attempts: 1,
+  while (attempts <= (step.retry ?? 0)) {
+    attempts += 1;
+
+    childResults = await Promise.all(childSteps.map((childStep) => executeStep({
+      definition,
+      step: childStep,
       state,
-    }, hookEvents);
-  } else {
+      runId: run.run_id,
+      runsDir,
+      effectiveRuntime,
+      toolRegistry,
+      options,
+      useHooks: false,
+    })));
+
+    for (const childResult of childResults) {
+      if (childResult.abortRun) {
+        return childResult;
+      }
+    }
+
+    childStepRuns = childResults.map((result) => result.stepRun);
+
+    const failedChildren = childResults.filter((result) => result.error);
+    inputsByStep = Object.fromEntries(childStepRuns.map((stepRun) => [stepRun.id, stepRun.inputs]));
+    const outputsByStep = Object.fromEntries(childStepRuns.map((stepRun) => [stepRun.id, stepRun.outputs]));
+    finalOutputs = {
+      results: childStepRuns.map((stepRun) => stepRun.outputs),
+      by_step: outputsByStep,
+      step_ids: childStepRuns.map((stepRun) => stepRun.id),
+    };
+
+    if (failedChildren.length) {
+      lastError = new RuntimeError(
+        `parallel '${step.id}' failed: ${failedChildren
+          .map((result) => `${result.stepRun.id}: ${result.error.message}`)
+          .join("; ")}`,
+      );
+      continue;
+    }
+
     const issues = validateShape(
       finalOutputs,
       step.out ?? DEFAULT_PARALLEL_OUTPUT_SCHEMA,
@@ -693,15 +722,24 @@ async function executeParallelStep({
 
     if (issues.length) {
       lastError = new RuntimeError(`parallel output failed validation: ${issues.join("; ")}`);
-      await callHook(effectiveRuntime.hooks?.onStepError, {
-        runId: run.run_id,
-        step,
-        error: serializeError(lastError),
-        attempts: 1,
-        state,
-      }, hookEvents);
+      continue;
     }
+
+    lastError = null;
+    break;
   }
+
+  if (lastError) {
+    await callHook(effectiveRuntime.hooks?.onStepError, {
+      runId: run.run_id,
+      step,
+      error: serializeError(lastError),
+      attempts,
+      state,
+    }, hookEvents);
+  }
+
+  run.steps.push(...childStepRuns);
 
   const stepRun = await finalizeStepRun({
     definition,
@@ -715,7 +753,7 @@ async function executeParallelStep({
       id: step.id,
       kind: step.kind,
       status: lastError ? "failed" : "success",
-      attempts: 1,
+      attempts,
       inputs: {
         by_step: deepClone(inputsByStep),
       },

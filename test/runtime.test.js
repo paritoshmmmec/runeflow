@@ -1663,6 +1663,132 @@ output {
   assert.ok(elapsedMs < 110, `expected parallel execution, got ${elapsedMs}ms`);
 });
 
+test("runRuneflow honors skip_if on parallel steps", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-parallel-skip-"));
+  const parsed = parseRuneflow(`---
+name: parallel-skip
+description: Parallel skip workflow
+version: 0.1
+inputs:
+  enabled: boolean
+outputs:
+  skipped: boolean
+---
+
+\`\`\`runeflow
+parallel gather {
+  skip_if: not inputs.enabled
+  steps: [fetch_one, fetch_two]
+}
+
+step fetch_one type=tool {
+  tool: mock.one
+  out: { value: string }
+}
+
+step fetch_two type=tool {
+  tool: mock.two
+  out: { value: string }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { skipped: steps.gather.status == "skipped" }
+  out: { skipped: boolean }
+}
+
+output {
+  skipped: steps.finish.skipped
+}
+\`\`\`
+`);
+
+  let childCalls = 0;
+  const run = await runRuneflow(
+    parsed,
+    { enabled: false },
+    {
+      tools: {
+        "mock.one": async () => {
+          childCalls += 1;
+          return { value: "one" };
+        },
+        "mock.two": async () => {
+          childCalls += 1;
+          return { value: "two" };
+        },
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(childCalls, 0);
+  assert.deepEqual(run.steps.map((step) => [step.id, step.status]), [
+    ["gather", "skipped"],
+    ["finish", "success"],
+  ]);
+  assert.equal(run.outputs.skipped, true);
+});
+
+test("runRuneflow honors retry on parallel steps", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-parallel-retry-"));
+  const parsed = parseRuneflow(`---
+name: parallel-retry
+description: Parallel retry workflow
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+parallel gather retry=1 {
+  steps: [fetch_one, fetch_two]
+}
+
+step fetch_one type=tool {
+  tool: mock.one
+  out: { value: string }
+}
+
+step fetch_two type=tool {
+  tool: mock.two
+  out: { value: string }
+}
+
+output {
+  result: steps.gather.by_step.fetch_two.value
+}
+\`\`\`
+`);
+
+  let attempts = 0;
+  const run = await runRuneflow(
+    parsed,
+    {},
+    {
+      tools: {
+        "mock.one": async () => ({ value: "one" }),
+        "mock.two": async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new Error("temporary failure");
+          }
+          return { value: "two" };
+        },
+      },
+    },
+    { runsDir },
+  );
+
+  assert.equal(run.status, "success");
+  assert.equal(attempts, 2);
+  assert.equal(run.steps[2].id, "gather");
+  assert.equal(run.steps[2].attempts, 2);
+  assert.equal(run.outputs.result, "two");
+});
+
 test("runRuneflow halts on human_input when no answer is provided", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-human-input-"));
   const parsed = parseRuneflow(`---
