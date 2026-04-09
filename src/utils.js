@@ -68,24 +68,114 @@ export function getByPath(value, segments) {
 }
 
 /**
+ * Default env var allowlist for ${VAR} expansion in skill frontmatter.
+ *
+ * Only these variables (plus any added via RUNEFLOW_ENV_ALLOWLIST) are
+ * expanded when processing mcp_servers / composio configs. This prevents
+ * a malicious skill file from exfiltrating sensitive env vars through
+ * URLs, headers, or arguments.
+ *
+ * Extend at runtime:  RUNEFLOW_ENV_ALLOWLIST=MY_VAR,OTHER_VAR
+ * Disable the guard:  RUNEFLOW_ENV_ALLOWLIST=*
+ */
+const DEFAULT_ENV_ALLOWLIST = new Set([
+  // LLM provider keys — needed for composio / MCP auth
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "CEREBRAS_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  // Composio
+  "COMPOSIO_API_KEY",
+  "COMPOSIO_CONNECTED_ACCOUNT_ID",
+  "COMPOSIO_USER_ID",
+  "COMPOSIO_ENTITY_ID",
+  "COMPOSIO_TOOLKIT_VERSION_GITHUB",
+  "COMPOSIO_TOOLKIT_VERSION_LINEAR",
+  // Common integration variables
+  "MCP_SERVER_URL",
+  "MCP_AUTH_TOKEN",
+  // Node / runtime
+  "NODE_ENV",
+  "HOME",
+  "PATH",
+]);
+
+function buildEnvAllowlist() {
+  const raw = process.env.RUNEFLOW_ENV_ALLOWLIST;
+
+  // Bypass: allow all
+  if (raw === "*") return null;
+
+  const extended = new Set(DEFAULT_ENV_ALLOWLIST);
+  if (raw) {
+    for (const key of raw.split(",")) {
+      const trimmed = key.trim();
+      if (trimmed) extended.add(trimmed);
+    }
+  }
+  return extended;
+}
+
+let _cachedAllowlist;
+
+function getEnvAllowlist() {
+  if (_cachedAllowlist === undefined) {
+    _cachedAllowlist = buildEnvAllowlist();
+  }
+  return _cachedAllowlist;
+}
+
+/** @internal — exported for tests */
+export function _resetEnvAllowlistCache() {
+  _cachedAllowlist = undefined;
+}
+
+/**
  * Expand ${VAR} references in a string using process.env.
  * Non-string values are returned as-is.
+ *
+ * When called without an allowlist (or with allowlist=null), expands
+ * any variable — this is the low-level helper used by programmatic callers
+ * who have already validated trust.
  */
-export function expandEnvVars(value) {
+export function expandEnvVars(value, allowlist = undefined) {
   if (typeof value !== "string") return value;
-  return value.replace(/\$\{([^}]+)\}/g, (_, key) => process.env[key] ?? "");
+  return value.replace(/\$\{([^}]+)\}/g, (_, key) => {
+    if (allowlist !== undefined && allowlist !== null && !allowlist.has(key)) {
+      process.stderr.write(
+        `[runeflow] blocked env var expansion: \${${key}} is not in the allowlist. ` +
+        `Add it via RUNEFLOW_ENV_ALLOWLIST=${key}\n`,
+      );
+      return "";
+    }
+    return process.env[key] ?? "";
+  });
 }
 
 /**
  * Recursively walk a value and expand ${VAR} in all string leaves.
+ *
+ * Uses the env var allowlist by default — only variables in the allowlist
+ * (or extended via RUNEFLOW_ENV_ALLOWLIST) are expanded. Unrecognized
+ * variables resolve to empty string with a warning on stderr.
+ *
+ * Set RUNEFLOW_ENV_ALLOWLIST=* to disable the guard entirely.
  */
 export function deepExpandEnvVars(value) {
-  if (typeof value === "string") return expandEnvVars(value);
-  if (Array.isArray(value)) return value.map(deepExpandEnvVars);
-  if (isPlainObject(value)) {
-    const result = {};
-    for (const [k, v] of Object.entries(value)) result[k] = deepExpandEnvVars(v);
-    return result;
+  const allowlist = getEnvAllowlist();
+
+  function walk(current) {
+    if (typeof current === "string") return expandEnvVars(current, allowlist);
+    if (Array.isArray(current)) return current.map(walk);
+    if (isPlainObject(current)) {
+      const result = {};
+      for (const [k, v] of Object.entries(current)) result[k] = walk(v);
+      return result;
+    }
+    return current;
   }
-  return value;
+
+  return walk(value);
 }

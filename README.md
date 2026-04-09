@@ -2,9 +2,9 @@
 
 # ⚡ Runeflow
 
-**A strict, deterministic runtime for hybrid AI skills.**
+**LLM apps break because control flow lives inside prompts.**
 
-The runtime owns 100% of workflow logic. The LLM only participates where you explicitly say so.
+**Runeflow fixes that.** One Markdown file. Typed workflow. The runtime runs the plan, the LLM does its part.
 
 [![npm version](https://img.shields.io/npm/v/runeflow?color=blueviolet)](https://www.npmjs.com/package/runeflow)
 [![CI](https://github.com/paritoshmmmec/runeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/paritoshmmmec/runeflow/actions/workflows/ci.yml)
@@ -85,6 +85,7 @@ Create `draft-pr.runeflow.md` inside any git repo:
 ````md
 ---
 name: draft-pr
+description: Draft a pull request from the current branch.
 version: 0.1
 inputs:
   base_branch: string
@@ -130,7 +131,7 @@ output {
 
 **Step 4 — Run it**
 
-The default runtime handles Cerebras, OpenAI, and Anthropic automatically — no extra config needed.
+The default runtime handles all 6 providers (Cerebras, OpenAI, Anthropic, Groq, Mistral, Google) automatically — no extra config needed.
 
 Export your key and run:
 
@@ -384,10 +385,10 @@ runeflow tools inspect git.diff_summary
 runeflow init [--name <name>] [--provider <provider>]
 runeflow validate <file> [--runtime ./runtime.js]
 runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
-runeflow resume <file> [--runtime ./runtime.js] [--prompt '{"step":"answer"}']
-runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
+runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--prompt '{"step":"answer"}']
+runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
 runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
-runeflow inspect-run <run-id>
+runeflow inspect-run <run-id> [--runs-dir ./.runeflow-runs]
 runeflow import <file> [--output converted.runeflow.md]
 runeflow tools list [--runtime ./runtime.js]
 runeflow tools inspect <tool-name> [--runtime ./runtime.js]
@@ -434,15 +435,15 @@ export default {
   llms: {
     ...base.llms,
     // add any provider the AI SDK supports, or a fully custom handler
-    ollama: async ({ llm, prompt, input, schema, docs }) => {
+    ollama: async ({ llm, prompt, input, schema, docs, step, state, context }) => {
       // call your LLM, return an object matching schema
       return { title: "..." };
     },
   },
   hooks: {
-    beforeStep: async ({ step, state }) => {},   // optional, can abort
-    afterStep: async ({ step, stepRun }) => {},  // optional, non-fatal
-    onStepError: async ({ step, error }) => {},  // optional, non-fatal
+    beforeStep: async ({ runId, step, state }) => {},            // optional, can abort via { abort: true, reason }
+    afterStep: async ({ runId, step, stepRun, state }) => {},    // optional, non-fatal
+    onStepError: async ({ runId, step, error, attempts, state }) => {},  // optional, non-fatal
   },
 };
 ```
@@ -541,6 +542,7 @@ The default Composio client plugin expects `COMPOSIO_API_KEY` and `@composio/cor
 | [`examples/review-draft.runeflow.md`](./examples/review-draft.runeflow.md) | Code review notes — step-level LLM override |
 | [`examples/release-notes.runeflow.md`](./examples/release-notes.runeflow.md) | Release notes — `transform` + `const` + LLM |
 | [`examples/block-demo.runeflow.md`](./examples/block-demo.runeflow.md) | Reusable block templates |
+| [`examples/composio-github.runeflow.md`](./examples/composio-github.runeflow.md) | Composio adapter — GitHub API via plugin |
 
 ---
 
@@ -617,8 +619,17 @@ step push type=tool cache=false {
 
 - Skill files define `transform` expressions — treat them as trusted code in the host process
 - `transform` runs via `new Function`. Set `RUNEFLOW_DISABLE_TRANSFORM=1` to block transform steps
+- `cli` steps run shell commands via `sh -c` (or `cmd /c` on Windows) — treat skill files as executable code
 - `--runtime ./path.js` loads that module via Node `import()` — only load trusted runtimes
-- `mcp_servers` and `composio` frontmatter blocks support `${VAR}` env var interpolation — any env var accessible to the process can be referenced. Only run skill files from trusted sources.
+- `mcp_servers` and `composio` frontmatter blocks support `${VAR}` env var interpolation. By default, only a curated allowlist of known integration keys (provider API keys, Composio IDs, etc.) can be expanded. Unrecognized variables resolve to an empty string with a warning on stderr. Extend the allowlist or disable it:
+
+```bash
+# Add extra allowed variables (comma-separated)
+export RUNEFLOW_ENV_ALLOWLIST=MY_CUSTOM_TOKEN,DEPLOY_KEY
+
+# Disable the allowlist entirely (trust the skill file fully)
+export RUNEFLOW_ENV_ALLOWLIST=*
+```
 
 ---
 
@@ -627,8 +638,8 @@ step push type=tool cache=false {
 | Phase | Status | What |
 |---|---|---|
 | v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
-| v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps |
-| v0.3 | 📅 planned | MCP server, `runeflow build` (LLM → skill compiler), agent integration |
+| v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps, MCP client plugins (stdio + HTTP), Composio client plugin, env var allowlist |
+| v0.3 | 📅 planned | MCP server (expose `runeflow_run` as an MCP tool), `runeflow build` (LLM → skill compiler), agent integration |
 
 ---
 
