@@ -618,6 +618,7 @@ step push type=tool cache=false {
 - Skill files define `transform` expressions — treat them as trusted code in the host process
 - `transform` runs via `new Function`. Set `RUNEFLOW_DISABLE_TRANSFORM=1` to block transform steps
 - `--runtime ./path.js` loads that module via Node `import()` — only load trusted runtimes
+- `mcp_servers` and `composio` frontmatter blocks support `${VAR}` env var interpolation — any env var accessible to the process can be referenced. Only run skill files from trusted sources.
 
 ---
 

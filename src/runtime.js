@@ -101,40 +101,50 @@ async function buildFrontmatterPlugins(definition, options = {}) {
   const plugins = [];
   const { mcp_servers, composio } = definition.metadata ?? {};
 
-  if (isPlainObject(mcp_servers)) {
-    for (const [serverName, rawConfig] of Object.entries(mcp_servers)) {
-      const config = deepExpandEnvVars(rawConfig);
-      if (config.url) {
-        plugins.push(await createMcpHttpClientPlugin({
-          serverName,
-          url: config.url,
-          headers: config.headers,
-          idleTimeoutMs: config.idleTimeoutMs,
-        }));
-      } else {
-        plugins.push(await createMcpClientPlugin({
-          serverName,
-          command: config.command,
-          args: config.args ?? [],
-          env: { ...process.env, ...(config.env ?? {}) },
-          cwd: config.cwd ?? options.cwd,
-          idleTimeoutMs: config.idleTimeoutMs,
-        }));
+  try {
+    if (isPlainObject(mcp_servers)) {
+      for (const [serverName, rawConfig] of Object.entries(mcp_servers)) {
+        const config = deepExpandEnvVars(rawConfig);
+        if (config.url) {
+          plugins.push(await createMcpHttpClientPlugin({
+            serverName,
+            url: config.url,
+            headers: config.headers,
+            idleTimeoutMs: config.idleTimeoutMs,
+          }));
+        } else {
+          plugins.push(await createMcpClientPlugin({
+            serverName,
+            command: config.command,
+            args: config.args ?? [],
+            env: { ...process.env, ...(config.env ?? {}) },
+            cwd: config.cwd ?? options.cwd,
+            idleTimeoutMs: config.idleTimeoutMs,
+          }));
+        }
       }
     }
-  }
 
-  if (isPlainObject(composio)) {
-    const cfg = deepExpandEnvVars(composio);
-    plugins.push(await createComposioClientPlugin({
-      tools: cfg.tools,
-      toolkits: cfg.toolkits,
-      executeDefaults: {
-        userId: cfg.entity_id ?? cfg.user_id,
-        connectedAccountId: cfg.connected_account_id,
-      },
-      cwd: options.cwd,
-    }));
+    if (isPlainObject(composio)) {
+      const cfg = deepExpandEnvVars(composio);
+      plugins.push(await createComposioClientPlugin({
+        tools: cfg.tools,
+        toolkits: cfg.toolkits,
+        executeDefaults: {
+          userId: cfg.entity_id ?? cfg.user_id,
+          connectedAccountId: cfg.connected_account_id,
+        },
+        cwd: options.cwd,
+      }));
+    }
+  } catch (error) {
+    // Close any plugins that were successfully created before the failure
+    await Promise.allSettled(
+      plugins
+        .filter((p) => typeof p.close === "function")
+        .map((p) => p.close()),
+    );
+    throw error;
   }
 
   return plugins;

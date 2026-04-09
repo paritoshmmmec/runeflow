@@ -369,8 +369,8 @@ export function validateSkill(definition, options = {}) {
       }
     }
 
-    // Cross-check mcp.* and composio.* tool references against frontmatter declarations
-    // Only validate if the skill explicitly declares mcp_servers or composio in frontmatter
+    // Cross-check mcp.* tool references against frontmatter mcp_servers declarations
+    // Only validate if the skill explicitly declares mcp_servers in frontmatter
     if (step.kind === "tool" && typeof step.tool === "string") {
       const parts = step.tool.split(".");
       if (parts[0] === "mcp" && parts[1] && metadata.mcp_servers !== null && metadata.mcp_servers !== undefined) {
@@ -378,9 +378,6 @@ export function validateSkill(definition, options = {}) {
         if (!Object.prototype.hasOwnProperty.call(declared, parts[1])) {
           issues.push(`step '${step.id}' references MCP server '${parts[1]}' but it is not declared in mcp_servers`);
         }
-      }
-      if (parts[0] === "composio" && metadata.composio !== null && metadata.composio !== undefined && !metadata.composio) {
-        issues.push(`step '${step.id}' references a composio tool but 'composio' is not declared in frontmatter`);
       }
     }
 
