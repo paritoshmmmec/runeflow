@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { checkAuth } from "./auth.js";
 import { RuntimeError, ValidationError } from "./errors.js";
-import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
+import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveBindings, resolveTemplate } from "./expression.js";
 import { closeRuntimePlugins, createRuntimeEnvironment, createMcpClientPlugin, createMcpHttpClientPlugin, createComposioClientPlugin } from "./runtime-plugins.js";
 import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
@@ -26,29 +26,6 @@ function createRunId() {
   return `run_${compact}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function resolveBindings(value, state) {
-  if (Array.isArray(value)) {
-    return value.map((item) => resolveBindings(item, state));
-  }
-
-  if (isPlainObject(value)) {
-    const resolved = {};
-    for (const [key, child] of Object.entries(value)) {
-      resolved[key] = resolveBindings(child, state);
-    }
-    return resolved;
-  }
-
-  if (typeof value === "string" && hasTemplateExpressions(value)) {
-    return resolveTemplate(value, state);
-  }
-
-  if (typeof value === "string" && looksLikeExpression(value)) {
-    return evaluateExpression(value, state);
-  }
-
-  return value;
-}
 
 async function writeRunArtifact(run, runsDir) {
   await ensureDir(runsDir);
@@ -195,8 +172,21 @@ function haltRun(run, stepId, message, error = null) {
   run.finished_at = new Date().toISOString();
 }
 
+function canonicalStringify(value) {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalStringify).join(",") + "]";
+  }
+
+  const sortedKeys = Object.keys(value).sort();
+  return "{" + sortedKeys.map((key) => JSON.stringify(key) + ":" + canonicalStringify(value[key])).join(",") + "}";
+}
+
 function hashStepInputs(resolvedInput) {
-  const stable = JSON.stringify(resolvedInput, Object.keys(resolvedInput ?? {}).sort());
+  const stable = canonicalStringify(resolvedInput ?? {});
   return crypto.createHash("sha256").update(stable).digest("hex");
 }
 
@@ -641,7 +631,7 @@ async function executeStep({
       outputs: lastError || waitingForInput ? null : deepClone(finalOutputs),
       error: lastError ? serializeError(lastError) : null,
       input_hash: step.cache !== false ? hashStepInputs(resolvedInput ?? {}) : undefined,
-      projected_docs: step.kind === "llm" ? undefined : undefined,
+      projected_docs: undefined,
       prompt: waitingForInput ? resolvedPrompt : undefined,
       choices: waitingForInput ? deepClone(resolvedChoices) : undefined,
       default_value: waitingForInput ? deepClone(resolvedDefault) : undefined,

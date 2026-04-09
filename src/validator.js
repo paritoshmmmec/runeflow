@@ -1,20 +1,10 @@
 import { resolveWorkflowBlocks } from "./blocks.js";
-import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression } from "./expression.js";
+import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression, STEP_STATE_FIELDS } from "./expression.js";
 import { shapeHasPath } from "./schema.js";
 import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
 import { isPlainObject } from "./utils.js";
 
-const STEP_RUNTIME_FIELDS = new Set([
-  "status",
-  "error",
-  "attempts",
-  "artifact_path",
-  "result_path",
-  "inputs",
-  "outputs",
-  "started_at",
-  "finished_at",
-]);
+const STEP_RUNTIME_FIELDS = STEP_STATE_FIELDS;
 
 function collectReferences(value, issues, location) {
   const references = [];
