@@ -339,6 +339,8 @@ export function parseSkill(source, options = {}) {
       inputs: frontmatter.inputs ?? {},
       outputs: frontmatter.outputs ?? {},
       llm: frontmatter.llm ?? null,
+      mcp_servers: frontmatter.mcp_servers ?? null,
+      composio: frontmatter.composio ?? null,
     },
     consts: frontmatter.const ?? {},
     docs: cleanedBody,

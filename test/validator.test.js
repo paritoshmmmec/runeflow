@@ -606,3 +606,134 @@ output {
   assert.equal(result.valid, false);
   assert.match(result.issues.join("\n"), /choices must be a non-empty array/);
 });
+
+test("validateRuneflow rejects mcp_servers entry without command or url", () => {
+  const parsed = parseRuneflow(`---
+name: bad-mcp-server
+description: Bad MCP server config
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+mcp_servers:
+  github:
+    env:
+      TOKEN: abc
+---
+
+\`\`\`runeflow
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((i) => i.includes("must declare either 'command' (stdio) or 'url' (HTTP)")));
+});
+
+test("validateRuneflow rejects mcp_servers entry with both command and url", () => {
+  const parsed = parseRuneflow(`---
+name: both-mcp
+description: Both command and url
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+mcp_servers:
+  github:
+    command: npx
+    url: "https://example.com/mcp"
+---
+
+\`\`\`runeflow
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((i) => i.includes("must declare 'command' OR 'url', not both")));
+});
+
+test("validateRuneflow rejects composio without tools or toolkits", () => {
+  const parsed = parseRuneflow(`---
+name: bad-composio
+description: Composio without tools
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+composio:
+  entity_id: "default"
+---
+
+\`\`\`runeflow
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((i) => i.includes("must declare at least one of 'tools' or 'toolkits'")));
+});
+
+test("validateRuneflow catches mcp.* tool referencing undeclared server in mcp_servers", () => {
+  const parsed = parseRuneflow(`---
+name: undeclared-mcp
+description: Undeclared MCP server
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+mcp_servers:
+  github:
+    command: npx
+---
+
+\`\`\`runeflow
+step search type=tool {
+  tool: mcp.slack.search
+  with: { query: "hello" }
+  out: { content: [any], isError: boolean, raw: any }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((i) => i.includes("not declared in mcp_servers")));
+});

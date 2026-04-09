@@ -1,7 +1,7 @@
 import { SkillSyntaxError } from "./errors.js";
 import { getByPath } from "./utils.js";
 
-const STEP_STATE_FIELDS = new Set([
+export const STEP_STATE_FIELDS = new Set([
   "status",
   "error",
   "attempts",
@@ -417,4 +417,28 @@ export function collectExpressionPaths(expression) {
 
   walk(ast);
   return paths;
+}
+
+export function resolveBindings(value, state) {
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveBindings(item, state));
+  }
+
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const resolved = {};
+    for (const [key, child] of Object.entries(value)) {
+      resolved[key] = resolveBindings(child, state);
+    }
+    return resolved;
+  }
+
+  if (typeof value === "string" && hasTemplateExpressions(value)) {
+    return resolveTemplate(value, state);
+  }
+
+  if (typeof value === "string" && looksLikeExpression(value)) {
+    return evaluateExpression(value, state);
+  }
+
+  return value;
 }

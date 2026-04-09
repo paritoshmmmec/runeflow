@@ -254,3 +254,74 @@ output {}
     (error) => error instanceof SkillSyntaxError && /Duplicate block id 'a'/.test(error.message),
   );
 });
+
+test("parseRuneflow extracts mcp_servers and composio from frontmatter into metadata", () => {
+  const parsed = parseRuneflow(`---
+name: mcp-frontmatter-test
+description: Test mcp_servers and composio parsing
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+mcp_servers:
+  github:
+    command: npx
+    args: ["-y", "@github/mcp-server"]
+  slack:
+    url: "https://mcp.composio.dev/slack"
+    headers:
+      x-api-key: "\${SLACK_KEY}"
+composio:
+  tools: ["GITHUB_LIST_BRANCHES"]
+  entity_id: "\${COMPOSIO_ENTITY_ID}"
+---
+
+\`\`\`runeflow
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  assert.deepEqual(parsed.metadata.mcp_servers, {
+    github: { command: "npx", args: ["-y", "@github/mcp-server"] },
+    slack: { url: "https://mcp.composio.dev/slack", headers: { "x-api-key": "${SLACK_KEY}" } },
+  });
+  assert.deepEqual(parsed.metadata.composio, {
+    tools: ["GITHUB_LIST_BRANCHES"],
+    entity_id: "${COMPOSIO_ENTITY_ID}",
+  });
+});
+
+test("parseRuneflow returns null for mcp_servers and composio when not declared", () => {
+  const parsed = parseRuneflow(`---
+name: no-mcp
+description: No MCP
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step finish type=tool {
+  tool: util.complete
+  with: { result: "done" }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  assert.equal(parsed.metadata.mcp_servers, null);
+  assert.equal(parsed.metadata.composio, null);
+});

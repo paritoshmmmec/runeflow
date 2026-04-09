@@ -1,20 +1,10 @@
 import { resolveWorkflowBlocks } from "./blocks.js";
-import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression } from "./expression.js";
+import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression, STEP_STATE_FIELDS } from "./expression.js";
 import { shapeHasPath } from "./schema.js";
 import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
 import { isPlainObject } from "./utils.js";
 
-const STEP_RUNTIME_FIELDS = new Set([
-  "status",
-  "error",
-  "attempts",
-  "artifact_path",
-  "result_path",
-  "inputs",
-  "outputs",
-  "started_at",
-  "finished_at",
-]);
+const STEP_RUNTIME_FIELDS = STEP_STATE_FIELDS;
 
 function collectReferences(value, issues, location) {
   const references = [];
@@ -224,6 +214,46 @@ export function validateSkill(definition, options = {}) {
     validateLlmConfig(metadata.llm, "metadata.llm", issues);
   }
 
+  // Validate mcp_servers frontmatter
+  if (metadata.mcp_servers !== null && metadata.mcp_servers !== undefined) {
+    if (!isPlainObject(metadata.mcp_servers)) {
+      issues.push("metadata.mcp_servers must be an object");
+    } else {
+      for (const [name, server] of Object.entries(metadata.mcp_servers)) {
+        if (!isPlainObject(server)) {
+          issues.push(`metadata.mcp_servers.${name} must be an object`);
+          continue;
+        }
+        const hasCommand = typeof server.command === "string" && server.command.trim();
+        const hasUrl = typeof server.url === "string" && server.url.trim();
+        if (!hasCommand && !hasUrl) {
+          issues.push(`metadata.mcp_servers.${name} must declare either 'command' (stdio) or 'url' (HTTP)`);
+        }
+        if (hasCommand && hasUrl) {
+          issues.push(`metadata.mcp_servers.${name} must declare 'command' OR 'url', not both`);
+        }
+      }
+    }
+  }
+
+  // Validate composio frontmatter
+  if (metadata.composio !== null && metadata.composio !== undefined) {
+    if (!isPlainObject(metadata.composio)) {
+      issues.push("metadata.composio must be an object");
+    } else {
+      const { tools: composioTools, toolkits } = metadata.composio;
+      if (composioTools !== undefined && !Array.isArray(composioTools)) {
+        issues.push("metadata.composio.tools must be an array");
+      }
+      if (toolkits !== undefined && !Array.isArray(toolkits)) {
+        issues.push("metadata.composio.toolkits must be an array");
+      }
+      if (!composioTools?.length && !toolkits?.length) {
+        issues.push("metadata.composio must declare at least one of 'tools' or 'toolkits'");
+      }
+    }
+  }
+
   if (!workflow.steps.length) {
     issues.push("workflow must declare at least one step or branch");
   }
@@ -326,6 +356,18 @@ export function validateSkill(definition, options = {}) {
     if (step.kind === "cli") {
       if (typeof step.command !== "string" || !step.command.trim()) {
         issues.push(`step '${step.id}' must declare a command`);
+      }
+    }
+
+    // Cross-check mcp.* tool references against frontmatter mcp_servers declarations
+    // Only validate if the skill explicitly declares mcp_servers in frontmatter
+    if (step.kind === "tool" && typeof step.tool === "string") {
+      const parts = step.tool.split(".");
+      if (parts[0] === "mcp" && parts[1] && metadata.mcp_servers !== null && metadata.mcp_servers !== undefined) {
+        const declared = metadata.mcp_servers ?? {};
+        if (!Object.prototype.hasOwnProperty.call(declared, parts[1])) {
+          issues.push(`step '${step.id}' references MCP server '${parts[1]}' but it is not declared in mcp_servers`);
+        }
       }
     }
 

@@ -11,31 +11,10 @@
  * Zero changes to runtime.js — this is purely additive.
  */
 import { RuntimeError } from "./errors.js";
-import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
+import { evaluateExpression, resolveBindings } from "./expression.js";
 import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
-import { isPlainObject, deepClone } from "./utils.js";
+import { deepClone } from "./utils.js";
 
-// ─── Binding resolution (mirrors runtime.js, no artifact writing) ─────────────
-
-function resolveBindings(value, state) {
-  if (Array.isArray(value)) {
-    return value.map((item) => resolveBindings(item, state));
-  }
-  if (isPlainObject(value)) {
-    const resolved = {};
-    for (const [key, child] of Object.entries(value)) {
-      resolved[key] = resolveBindings(child, state);
-    }
-    return resolved;
-  }
-  if (typeof value === "string" && hasTemplateExpressions(value)) {
-    return resolveTemplate(value, state);
-  }
-  if (typeof value === "string" && looksLikeExpression(value)) {
-    return evaluateExpression(value, state);
-  }
-  return value;
-}
 
 function buildStepState(completedSteps) {
   return Object.fromEntries(completedSteps.map((s) => [s.id, s]));

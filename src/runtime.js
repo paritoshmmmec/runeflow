@@ -6,11 +6,11 @@ import { promisify } from "node:util";
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { checkAuth } from "./auth.js";
 import { RuntimeError, ValidationError } from "./errors.js";
-import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveTemplate } from "./expression.js";
-import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
+import { evaluateExpression, hasTemplateExpressions, looksLikeExpression, resolveBindings, resolveTemplate } from "./expression.js";
+import { closeRuntimePlugins, createRuntimeEnvironment, createMcpClientPlugin, createMcpHttpClientPlugin, createComposioClientPlugin } from "./runtime-plugins.js";
 import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
-import { deepClone, ensureDir, isPlainObject, serializeError } from "./utils.js";
+import { deepClone, ensureDir, isPlainObject, serializeError, deepExpandEnvVars } from "./utils.js";
 import { validateSkill } from "./validator.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
@@ -26,29 +26,6 @@ function createRunId() {
   return `run_${compact}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function resolveBindings(value, state) {
-  if (Array.isArray(value)) {
-    return value.map((item) => resolveBindings(item, state));
-  }
-
-  if (isPlainObject(value)) {
-    const resolved = {};
-    for (const [key, child] of Object.entries(value)) {
-      resolved[key] = resolveBindings(child, state);
-    }
-    return resolved;
-  }
-
-  if (typeof value === "string" && hasTemplateExpressions(value)) {
-    return resolveTemplate(value, state);
-  }
-
-  if (typeof value === "string" && looksLikeExpression(value)) {
-    return evaluateExpression(value, state);
-  }
-
-  return value;
-}
 
 async function writeRunArtifact(run, runsDir) {
   await ensureDir(runsDir);
@@ -97,6 +74,59 @@ function createRuntime(runtime = {}, options = {}) {
   return createRuntimeEnvironment(runtime, options);
 }
 
+async function buildFrontmatterPlugins(definition, options = {}) {
+  const plugins = [];
+  const { mcp_servers, composio } = definition.metadata ?? {};
+
+  try {
+    if (isPlainObject(mcp_servers)) {
+      for (const [serverName, rawConfig] of Object.entries(mcp_servers)) {
+        const config = deepExpandEnvVars(rawConfig);
+        if (config.url) {
+          plugins.push(await createMcpHttpClientPlugin({
+            serverName,
+            url: config.url,
+            headers: config.headers,
+            idleTimeoutMs: config.idleTimeoutMs,
+          }));
+        } else {
+          plugins.push(await createMcpClientPlugin({
+            serverName,
+            command: config.command,
+            args: config.args ?? [],
+            env: { ...process.env, ...(config.env ?? {}) },
+            cwd: config.cwd ?? options.cwd,
+            idleTimeoutMs: config.idleTimeoutMs,
+          }));
+        }
+      }
+    }
+
+    if (isPlainObject(composio)) {
+      const cfg = deepExpandEnvVars(composio);
+      plugins.push(await createComposioClientPlugin({
+        tools: cfg.tools,
+        toolkits: cfg.toolkits,
+        executeDefaults: {
+          userId: cfg.entity_id ?? cfg.user_id,
+          connectedAccountId: cfg.connected_account_id,
+        },
+        cwd: options.cwd,
+      }));
+    }
+  } catch (error) {
+    // Close any plugins that were successfully created before the failure
+    await Promise.allSettled(
+      plugins
+        .filter((p) => typeof p.close === "function")
+        .map((p) => p.close()),
+    );
+    throw error;
+  }
+
+  return plugins;
+}
+
 function resolveLlmConfig(definition, step) {
   return step.llm ?? definition.metadata.llm ?? null;
 }
@@ -142,8 +172,21 @@ function haltRun(run, stepId, message, error = null) {
   run.finished_at = new Date().toISOString();
 }
 
+function canonicalStringify(value) {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalStringify).join(",") + "]";
+  }
+
+  const sortedKeys = Object.keys(value).sort();
+  return "{" + sortedKeys.map((key) => JSON.stringify(key) + ":" + canonicalStringify(value[key])).join(",") + "}";
+}
+
 function hashStepInputs(resolvedInput) {
-  const stable = JSON.stringify(resolvedInput, Object.keys(resolvedInput ?? {}).sort());
+  const stable = canonicalStringify(resolvedInput ?? {});
   return crypto.createHash("sha256").update(stable).digest("hex");
 }
 
@@ -588,7 +631,7 @@ async function executeStep({
       outputs: lastError || waitingForInput ? null : deepClone(finalOutputs),
       error: lastError ? serializeError(lastError) : null,
       input_hash: step.cache !== false ? hashStepInputs(resolvedInput ?? {}) : undefined,
-      projected_docs: step.kind === "llm" ? undefined : undefined,
+      projected_docs: undefined,
       prompt: waitingForInput ? resolvedPrompt : undefined,
       choices: waitingForInput ? deepClone(resolvedChoices) : undefined,
       default_value: waitingForInput ? deepClone(resolvedDefault) : undefined,
@@ -774,7 +817,14 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     ...definition,
     workflow: resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }),
   };
-  const effectiveRuntime = createRuntime(runtime, options);
+
+  // Build plugins declared in skill frontmatter (mcp_servers, composio)
+  const frontmatterPlugins = await buildFrontmatterPlugins(resolvedDefinition, options);
+  const mergedRuntime = frontmatterPlugins.length > 0
+    ? { ...runtime, plugins: [...(runtime.plugins ?? []), ...frontmatterPlugins] }
+    : runtime;
+
+  const effectiveRuntime = createRuntime(mergedRuntime, options);
   try {
     const toolRegistry = loadToolRegistry({
       ...options,
