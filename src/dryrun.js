@@ -98,18 +98,23 @@ function tryResolve(fn) {
  * @returns {Promise<object>}  - { valid, validation, steps[], output }
  */
 export async function dryrunRuneflow(definition, inputs = {}, runtime = {}, options = {}) {
-  const environment = createRuntimeEnvironment(runtime, options);
+  // Fall back to definition.sourcePath so relative imports resolve correctly.
+  const effectiveOptions = options.sourcePath
+    ? options
+    : { ...options, sourcePath: definition.sourcePath ?? undefined };
+
+  const environment = createRuntimeEnvironment(runtime, effectiveOptions);
   const toolRegistry = loadToolRegistry({
     runtimeToolRegistry: environment.toolRegistry,
-    toolRegistry: options.toolRegistry,
+    toolRegistry: effectiveOptions.toolRegistry,
   });
 
   try {
     const issues = [];
-    const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], options, new Set(), issues);
+    const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], effectiveOptions, new Set(), issues);
     
     // We pass importedBlocks to validator so it uses the same cached/resolved blocks
-    const validation = validateSkill(definition, { toolRegistry, ...options });
+    const validation = validateSkill(definition, { toolRegistry, ...effectiveOptions });
 
     if (!validation.valid || issues.length > 0) {
       return { valid: false, validation: { valid: false, issues: [...validation.issues, ...issues], warnings: validation.warnings }, steps: [], output: null };

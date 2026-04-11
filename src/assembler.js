@@ -1,8 +1,9 @@
 /**
  * runeflow assemble
  *
- * Runs all tool/transform steps before a target llm step, resolves the prompt
- * and input with real values, then renders a clean Markdown context file.
+ * Runs all tool/transform/llm/cli/branch steps before a target llm step,
+ * resolves the prompt and input with real values, then renders a clean
+ * Markdown context file.
  *
  * The output is designed to be loaded by an agent (Claude Code, Codex, Cursor)
  * instead of the raw .runeflow.md. The agent sees only what it needs for one step:
@@ -10,19 +11,26 @@
  *
  * Zero changes to runtime.js — this is purely additive.
  */
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { RuntimeError } from "./errors.js";
 import { evaluateExpression, resolveBindings } from "./expression.js";
 import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
 import { deepClone, evalTransformExpr } from "./utils.js";
 
+const execFileAsync = promisify(execFile);
 
-function buildStepState(completedSteps) {
-  return Object.fromEntries(completedSteps.map((s) => [s.id, s]));
+function buildStepState(completedSteps, inputs, consts) {
+  return {
+    inputs,
+    stepMap: Object.fromEntries(completedSteps.map((s) => [s.id, s])),
+    consts: consts ?? {},
+  };
 }
 
-// ─── Pre-step executor (tool + transform only, no LLM, no artifacts) ─────────
+// ─── Pre-step executor ────────────────────────────────────────────────────────
 
-async function executePreSteps(definition, targetStepId, inputs, tools) {
+async function executePreSteps(definition, targetStepId, inputs, environment, options) {
   const steps = definition.workflow.steps;
   const targetIndex = steps.findIndex((s) => s.id === targetStepId);
 
@@ -35,15 +43,21 @@ async function executePreSteps(definition, targetStepId, inputs, tools) {
     throw new RuntimeError(`assemble only works on 'llm' steps. Step '${targetStepId}' is kind '${targetStep.kind}'.`);
   }
 
+  const { tools, llms } = environment;
   const completedSteps = [];
+  const stepIndex = new Map(steps.map((s, i) => [s.id, i]));
+  let i = 0;
 
-  for (let i = 0; i < targetIndex; i++) {
+  while (i < targetIndex) {
     const step = steps[i];
-    const state = {
-      inputs,
-      stepMap: buildStepState(completedSteps),
-      consts: definition.consts ?? {},
-    };
+    const state = buildStepState(completedSteps, inputs, definition.consts);
+
+    // skip_if
+    if (step.skip_if && evaluateExpression(step.skip_if, state)) {
+      completedSteps.push({ id: step.id, kind: step.kind, outputs: {} });
+      i += 1;
+      continue;
+    }
 
     if (step.kind === "tool") {
       const tool = tools[step.tool];
@@ -56,22 +70,77 @@ async function executePreSteps(definition, targetStepId, inputs, tools) {
       const outputs = await tool(resolvedInput, { step, state });
       completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
 
+    } else if (step.kind === "llm") {
+      const llmConfig = step.llm ?? definition.metadata.llm;
+      if (!llmConfig) {
+        throw new RuntimeError(`Step '${step.id}' has no llm configuration.`);
+      }
+      const handler = llms?.[llmConfig.provider];
+      if (typeof handler !== "function") {
+        throw new RuntimeError(
+          `No LLM handler registered for provider '${llmConfig.provider}'. Pass --runtime to provide LLM handlers.`,
+        );
+      }
+      const resolvedPrompt = resolveBindings(step.prompt, state);
+      const resolvedInput = resolveBindings(step.input ?? {}, state);
+      const docs = step.docs
+        ? (definition.docBlocks?.[step.docs] ?? definition.docs)
+        : definition.docs;
+      const outputs = await handler({
+        step,
+        llm: deepClone(llmConfig),
+        prompt: resolvedPrompt,
+        input: resolvedInput,
+        schema: step.schema,
+        state,
+        docs,
+        context: { docs, metadata: deepClone(definition.metadata), source_path: definition.sourcePath ?? null },
+      });
+      completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
+
     } else if (step.kind === "transform") {
       const resolvedInput = resolveBindings(step.input, state);
       const outputs = evalTransformExpr(step.expr, resolvedInput);
       completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
 
+    } else if (step.kind === "cli") {
+      const resolvedCommand = resolveBindings(step.command, state);
+      if (typeof resolvedCommand !== "string" || !resolvedCommand.trim()) {
+        throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
+      }
+      const cwd = options?.cwd ?? process.cwd();
+      const timeout = step.timeout ?? 30_000;
+      let outputs;
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          process.platform === "win32" ? "cmd" : "sh",
+          process.platform === "win32" ? ["/c", resolvedCommand] : ["-c", resolvedCommand],
+          { cwd, timeout, maxBuffer: 10 * 1024 * 1024 },
+        );
+        outputs = { stdout: stdout ?? "", stderr: stderr ?? "", exit_code: 0 };
+      } catch (error) {
+        if (typeof error.code === "number") {
+          outputs = { stdout: error.stdout ?? "", stderr: error.stderr ?? "", exit_code: error.code };
+          if (step.allow_failure !== true) {
+            throw new RuntimeError(
+              `cli step '${step.id}' exited with code ${error.code}.\nstderr: ${error.stderr || "(empty)"}`,
+            );
+          }
+        } else {
+          throw new RuntimeError(`cli step '${step.id}' failed to execute: ${error.message}`);
+        }
+      }
+      completedSteps.push({ id: step.id, kind: step.kind, outputs });
+
     } else if (step.kind === "branch") {
-      // Evaluate the branch and follow the chosen path — skip the other branch's steps
       const matched = evaluateExpression(step.if, state);
       const target = matched ? step.then : step.else;
-      completedSteps.push({
-        id: step.id,
-        kind: step.kind,
-        outputs: { matched, target },
-      });
-      // If the branch routes away from the target step, we can't assemble
-      // Check if target step is still reachable
+      completedSteps.push({ id: step.id, kind: step.kind, outputs: { matched, target } });
+
+      if (target === "fail") {
+        throw new RuntimeError(`Branch '${step.id}' routed to fail before reaching step '${targetStepId}'.`);
+      }
+
       const targetReachable = isStepReachable(steps, target, targetStepId);
       if (!targetReachable) {
         throw new RuntimeError(
@@ -80,12 +149,45 @@ async function executePreSteps(definition, targetStepId, inputs, tools) {
         );
       }
 
-    } else if (step.kind === "llm") {
-      throw new RuntimeError(
-        `Cannot assemble step '${targetStepId}': step '${step.id}' is an llm step that must execute first. ` +
-        `assemble only works when all preceding steps are tool, transform, or branch.`,
-      );
+      // Jump to the branch target
+      i = stepIndex.get(target);
+      continue;
+
+    } else if (step.kind === "parallel") {
+      // Execute child steps concurrently
+      const childIds = step.steps ?? [];
+      const childResults = await Promise.all(childIds.map(async (childId) => {
+        const childIdx = stepIndex.get(childId);
+        if (childIdx === undefined) return null;
+        const childStep = steps[childIdx];
+        const childState = buildStepState(completedSteps, inputs, definition.consts);
+        if (childStep.kind === "tool") {
+          const tool = tools[childStep.tool];
+          if (!tool) throw new RuntimeError(`Tool '${childStep.tool}' is not registered.`);
+          const resolvedInput = resolveBindings(childStep.with ?? {}, childState);
+          const outputs = await tool(resolvedInput, { step: childStep, state: childState });
+          return { id: childStep.id, kind: childStep.kind, outputs: deepClone(outputs) };
+        }
+        return { id: childStep.id, kind: childStep.kind, outputs: {} };
+      }));
+
+      for (const result of childResults) {
+        if (result) completedSteps.push(result);
+      }
+
+      // Skip past the child steps
+      i += childIds.length + 1;
+      continue;
+
+    } else if (step.kind === "human_input") {
+      // Can't interactively prompt during assemble — use default or placeholder
+      const resolvedDefault = step.default !== undefined
+        ? resolveBindings(step.default, state)
+        : "<pending>";
+      completedSteps.push({ id: step.id, kind: step.kind, outputs: { answer: resolvedDefault } });
     }
+
+    i += 1;
   }
 
   return completedSteps;
@@ -172,30 +274,27 @@ function renderAssembled({ definition, targetStep, resolvedPrompt, resolvedInput
 /**
  * Assemble a context file for a specific llm step.
  *
- * Runs all tool/transform steps before the target, resolves the prompt and
- * input with real values, and returns a Markdown string ready for an agent.
+ * Runs all steps before the target (tool, llm, cli, transform, branch),
+ * resolves the prompt and input with real values, and returns either a
+ * Markdown string (default) or a structured JSON object (format: "json").
  *
  * @param {object} definition  - parsed runeflow definition
  * @param {string} stepId      - id of the target llm step
  * @param {object} inputs      - workflow inputs
- * @param {object} runtime     - optional runtime with custom tools
- * @param {object} options     - { cwd }
- * @returns {Promise<string>}  - assembled Markdown
+ * @param {object} runtime     - optional runtime with custom tools and llms
+ * @param {object} options     - { cwd, format: "markdown"|"json" }
+ * @returns {Promise<string|object>}
  */
 export async function assembleRuneflow(definition, stepId, inputs = {}, runtime = {}, options = {}) {
   const environment = createRuntimeEnvironment(runtime, options);
 
   try {
-    const completedSteps = await executePreSteps(definition, stepId, inputs, environment.tools);
+    const completedSteps = await executePreSteps(definition, stepId, inputs, environment, options);
 
     const steps = definition.workflow.steps;
     const targetStep = steps.find((s) => s.id === stepId);
 
-    const state = {
-      inputs,
-      stepMap: buildStepState(completedSteps),
-      consts: definition.consts ?? {},
-    };
+    const state = buildStepState(completedSteps, inputs, definition.consts);
 
     const resolvedPrompt = resolveBindings(targetStep.prompt, state);
     const resolvedInput = resolveBindings(targetStep.input ?? {}, state);
@@ -203,6 +302,17 @@ export async function assembleRuneflow(definition, stepId, inputs = {}, runtime 
     const docs = targetStep.docs
       ? (definition.docBlocks?.[targetStep.docs] ?? definition.docs)
       : definition.docs;
+
+    if (options.format === "json") {
+      return {
+        skill: definition.metadata.name ?? "skill",
+        step: targetStep.id,
+        docs: docs?.trim() ?? null,
+        prompt: typeof resolvedPrompt === "string" ? resolvedPrompt.trim() : resolvedPrompt,
+        input: resolvedInput,
+        schema: targetStep.schema ?? null,
+      };
+    }
 
     return renderAssembled({
       definition,

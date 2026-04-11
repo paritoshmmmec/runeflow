@@ -11,15 +11,17 @@ export const template = {
     const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
     const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
     const skillName = options.name ?? `${repoSlug}llm-task`;
+    const repoName = signals.repoName ?? "a software project";
 
     return `---
 name: ${skillName}
-description: Generic LLM task — edit the prompt to suit your use case.
+description: A structured LLM task — edit the prompt and schema to suit your use case.
 version: 0.1
 inputs:
-  task: string
+  context: string
 outputs:
   result: string
+  reasoning: string
 llm:
   provider: ${provider}
   router: false
@@ -28,18 +30,26 @@ llm:
 
 # LLM Task
 
-A generic LLM task. Edit the prompt below to suit your use case.
+Edit the prompt below to describe what you want the model to do.
+The \`context\` input is passed in at runtime — replace it with whatever
+data your workflow needs (a diff, a document, a list of items, etc.).
 
 \`\`\`runeflow
 step run type=llm {
   prompt: |
-    Complete the following task:
-    {{ inputs.task }}
-  schema: { result: string }
+    You are a helpful assistant working on ${repoName}.
+
+    Context:
+    {{ inputs.context }}
+
+    Complete the task above. Be concise and specific.
+  input: { context: inputs.context }
+  schema: { result: string, reasoning: string }
 }
 
 output {
   result: steps.run.result
+  reasoning: steps.run.reasoning
 }
 \`\`\`
 `;

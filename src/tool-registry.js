@@ -85,15 +85,39 @@ export function loadBaseToolRegistry(options = {}) {
   // 1. Load built-in registry (always available, resolved from package root)
   const builtinRegistry = loadDirRegistry(PACKAGE_REGISTRY_DIR);
 
-  // 2. Load user registry from cwd (optional, merges on top — user entries win)
+  // 2. Auto-load runeflow-registry schemas if the package is installed.
+  //    Each provider ships a schemas.json alongside its schemas.js.
+  //    This is zero-config — install runeflow-registry and schemas appear in tools list.
+  let packageRegistry = new Map();
+  try {
+    const registryProvidersDir = path.resolve(
+      fileURLToPath(import.meta.url),
+      "../../node_modules/runeflow-registry/providers",
+    );
+    if (fs.existsSync(registryProvidersDir)) {
+      for (const entry of fs.readdirSync(registryProvidersDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const jsonPath = path.join(registryProvidersDir, entry.name, "schemas.json");
+        if (!fs.existsSync(jsonPath)) continue;
+        const schemas = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+        for (const schema of schemas) {
+          packageRegistry.set(schema.name, schema);
+        }
+      }
+    }
+  } catch {
+    // runeflow-registry not installed — skip silently
+  }
+
+  // 3. Load user registry from cwd (optional, merges on top — user entries win)
   const userRegistryDir = options.registryDir
     ? path.resolve(options.registryDir)
     : path.resolve(process.cwd(), "registry", "tools");
 
   const userRegistry = loadDirRegistry(userRegistryDir);
 
-  // Merge: built-ins first, user entries override
-  return new Map([...builtinRegistry, ...userRegistry]);
+  // Merge: built-ins first, package registry, user entries override
+  return new Map([...builtinRegistry, ...packageRegistry, ...userRegistry]);
 }
 
 export function loadToolRegistry(options = {}) {

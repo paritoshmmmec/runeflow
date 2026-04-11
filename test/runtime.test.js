@@ -2255,3 +2255,174 @@ output {
   assert.equal(run.outputs.answer, "yes");
   assert.equal(run.steps[0].outputs.answer, "yes");
 });
+
+test("runRuneflow executes parallel llm children and joins their outputs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-parallel-llm-"));
+  const parsed = parseRuneflow(`---
+name: parallel-llm
+description: Parallel llm workflow
+version: 0.1
+inputs: {}
+outputs:
+  drafts:
+    - any
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+parallel gather {
+  steps: [draft_one, draft_two]
+}
+
+step draft_one type=llm {
+  prompt: "Write title one."
+  schema: { title: string }
+}
+
+step draft_two type=llm {
+  prompt: "Write title two."
+  schema: { title: string }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { drafts: "{{ steps.gather.results }}" }
+  out: { drafts: [any] }
+}
+
+output {
+  drafts: steps.finish.drafts
+}
+\`\`\`
+`);
+
+  const calls = [];
+  const run = await runRuneflow(parsed, {}, {
+    llms: {
+      "mock-default": async ({ prompt }) => {
+        calls.push(prompt);
+        return { title: prompt.includes("one") ? "Title One" : "Title Two" };
+      },
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(run.steps.filter((s) => ["draft_one", "draft_two", "gather"].includes(s.id)).map((s) => s.id), ["draft_one", "draft_two", "gather"]);
+  assert.deepEqual(run.steps.find((s) => s.id === "gather").outputs.by_step.draft_one, { title: "Title One" });
+  assert.deepEqual(run.steps.find((s) => s.id === "gather").outputs.by_step.draft_two, { title: "Title Two" });
+});
+
+test("runRuneflow executes parallel cli children and joins their outputs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-parallel-cli-"));
+  const parsed = parseRuneflow(`---
+name: parallel-cli
+description: Parallel cli workflow
+version: 0.1
+inputs: {}
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+parallel checks {
+  steps: [check_one, check_two]
+}
+
+step check_one type=cli allow_failure=true {
+  command: "echo hello"
+}
+
+step check_two type=cli allow_failure=true {
+  command: "echo world"
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { ok: steps.checks.by_step.check_one.exit_code == 0 }
+  out: { ok: boolean }
+}
+
+output {
+  ok: steps.finish.ok
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {}, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.steps[2].outputs.by_step.check_one.exit_code, 0);
+  assert.equal(run.steps[2].outputs.by_step.check_two.exit_code, 0);
+  assert.equal(run.outputs.ok, true);
+});
+
+test("runRuneflow resolves cross-file imported blocks at runtime", async () => {
+  const tmpdir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-import-runtime-"));
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-import-runs-"));
+
+  // Write the shared block library
+  const libPath = path.join(tmpdir, "lib.runeflow.md");
+  await fs.writeFile(libPath, `---
+name: lib
+description: Shared block library
+version: 0.1
+inputs: {}
+outputs: {}
+---
+
+\`\`\`runeflow
+block greet type=llm {
+  prompt: "Say hello to {{ inputs.name }}."
+  schema: { greeting: string }
+}
+\`\`\`
+`);
+
+  // Write the main workflow that imports from the library
+  const mainPath = path.join(tmpdir, "main.runeflow.md");
+  await fs.writeFile(mainPath, `---
+name: import-runtime-demo
+description: Uses a block imported from another file
+version: 0.1
+inputs:
+  name: string
+outputs:
+  greeting: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+import blocks from "./lib.runeflow.md"
+
+step say_hello type=block {
+  block: greet
+  input: { name: inputs.name }
+}
+
+output {
+  greeting: steps.say_hello.greeting
+}
+\`\`\`
+`);
+
+  const source = await fs.readFile(mainPath, "utf8");
+  const definition = parseRuneflow(source, { sourcePath: mainPath });
+
+  const run = await runRuneflow(definition, { name: "Alice" }, {
+    llms: {
+      "mock-default": async ({ prompt }) => ({
+        greeting: `Hello, ${prompt.includes("Alice") ? "Alice" : "stranger"}!`,
+      }),
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.greeting, "Hello, Alice!");
+});

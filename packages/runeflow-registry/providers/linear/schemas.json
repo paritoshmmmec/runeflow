@@ -1,0 +1,105 @@
+[
+  {
+    "name": "linear.create_issue",
+    "description": "Create a Linear issue.",
+    "tags": [
+      "linear",
+      "issues"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "team_key": {
+          "type": "string",
+          "description": "Linear team key, e.g. ENG."
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number",
+          "description": "0=none, 1=urgent, 2=high, 3=medium, 4=low."
+        },
+        "assignee_email": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "team_key",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "linear.update_issue",
+    "description": "Update a Linear issue state, priority, or assignee.",
+    "tags": [
+      "linear",
+      "issues"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "assignee_email": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "issue_id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "updated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "updated"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

@@ -12,6 +12,7 @@ import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
 import { deepClone, ensureDir, isPlainObject, serializeError, deepExpandEnvVars, evalTransformExpr } from "./utils.js";
 import { validateSkill, loadImportedBlocks } from "./validator.js";
+import { createTelemetryEmitter } from "./telemetry.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
 const DEFAULT_PARALLEL_OUTPUT_SCHEMA = {
@@ -826,9 +827,25 @@ async function executeParallelStep({
   };
 }
 
+async function emitTelemetry(run, definition, options) {
+  if (!options.telemetry) return;
+  const emitter = createTelemetryEmitter({ output: options.telemetryOutput });
+  const stepMap = new Map((definition.workflow?.steps ?? []).map((s) => [s.id, s]));
+  for (const stepRun of run.steps) {
+    const step = stepMap.get(stepRun.id) ?? { id: stepRun.id, kind: stepRun.kind };
+    emitter.emitStep({ runId: run.run_id, step, stepRun });
+  }
+  await emitter.flush();
+}
+
 export async function runSkill(definition, inputs, runtime = {}, options = {}) {
+  // Ensure relative import paths resolve correctly when sourcePath is on the definition
+  const effectiveOptions = options.sourcePath
+    ? options
+    : { ...options, sourcePath: definition.sourcePath ?? undefined };
+
   const issues = [];
-  const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], options, new Set(), issues);
+  const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], effectiveOptions, new Set(), issues);
   if (issues.length) {
     throw new ValidationError("Failed to load imported blocks.", issues);
   }
@@ -839,31 +856,31 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
   };
 
   // Build plugins declared in skill frontmatter (mcp_servers, composio)
-  const frontmatterPlugins = await buildFrontmatterPlugins(resolvedDefinition, options);
+  const frontmatterPlugins = await buildFrontmatterPlugins(resolvedDefinition, effectiveOptions);
   const mergedRuntime = frontmatterPlugins.length > 0
     ? { ...runtime, plugins: [...(runtime.plugins ?? []), ...frontmatterPlugins] }
     : runtime;
 
-  const effectiveRuntime = createRuntime(mergedRuntime, options);
+  const effectiveRuntime = createRuntime(mergedRuntime, effectiveOptions);
   try {
     const toolRegistry = loadToolRegistry({
-      ...options,
+      ...effectiveOptions,
       runtimeToolRegistry: effectiveRuntime.toolRegistry,
     });
     const validation = validateSkill(resolvedDefinition, {
-      ...options,
+      ...effectiveOptions,
       runtimeToolRegistry: effectiveRuntime.toolRegistry,
     });
     if (!validation.valid) {
       throw new ValidationError("Skill validation failed.", validation.issues);
     }
 
-    const runsDir = options.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
+    const runsDir = effectiveOptions.runsDir ?? path.resolve(process.cwd(), DEFAULT_RUNS_DIR);
 
     // Auth pre-flight — only check providers not already handled by the runtime
     // Skip entirely if runtime provides its own llms handlers
-    if (options.checkAuth !== false && Object.keys(effectiveRuntime.llms ?? {}).length === 0) {
-      const authErrors = checkAuth(resolvedDefinition, options);
+    if (effectiveOptions.checkAuth !== false && Object.keys(effectiveRuntime.llms ?? {}).length === 0) {
+      const authErrors = checkAuth(resolvedDefinition, effectiveOptions);
       if (authErrors.length) {
         throw new ValidationError("Auth pre-flight failed.", authErrors);
       }
@@ -899,7 +916,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           runsDir,
           effectiveRuntime,
           toolRegistry,
-          options,
+          options: effectiveOptions,
         })
         : await executeStep({
           definition: resolvedDefinition,
@@ -909,13 +926,14 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           runsDir,
           effectiveRuntime,
           toolRegistry,
-          options,
+          options: effectiveOptions,
         });
 
       if (result.abortRun) {
         failRun(run, result.abortRun.reason);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
+        await emitTelemetry(run, resolvedDefinition, effectiveOptions);
         return run;
       }
 
@@ -936,6 +954,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
         run.finished_at = new Date().toISOString();
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
+        await emitTelemetry(run, resolvedDefinition, effectiveOptions);
         return run;
       }
 
@@ -945,6 +964,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           haltRun(run, step.id, resolvedFailMessage ?? result.error.message, result.error);
           run.outputs = {};
           run.artifact_path = await writeRunArtifact(run, runsDir);
+          await emitTelemetry(run, resolvedDefinition, effectiveOptions);
           return run;
         }
 
@@ -958,6 +978,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           failRun(run, resolvedFailMessage ?? `Branch '${step.id}' selected fail target.`);
           run.outputs = {};
           run.artifact_path = await writeRunArtifact(run, runsDir);
+          await emitTelemetry(run, resolvedDefinition, effectiveOptions);
           return run;
         }
 
@@ -970,6 +991,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
         failRun(run, resolvedFailMessage ?? `Step '${step.id}' terminated the run.`);
         run.outputs = {};
         run.artifact_path = await writeRunArtifact(run, runsDir);
+        await emitTelemetry(run, resolvedDefinition, effectiveOptions);
         return run;
       }
 
@@ -994,6 +1016,7 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     }
 
     run.artifact_path = await writeRunArtifact(run, runsDir);
+    await emitTelemetry(run, resolvedDefinition, effectiveOptions);
     return run;
   } finally {
     await closeRuntimePlugins(effectiveRuntime).catch(() => {});

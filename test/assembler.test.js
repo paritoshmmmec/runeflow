@@ -253,3 +253,122 @@ test("assembleRuneflow: output contains skill name and step id in header", async
   assert.ok(result.includes("test-skill"), "skill name in header");
   assert.ok(result.includes("`draft`"), "step id in header");
 });
+
+test("assembleRuneflow: executes llm pre-steps using runtime handler", async () => {
+  const skill = `---
+name: llm-prestep-skill
+version: 0.1
+inputs:
+  topic: string
+outputs:
+  final: string
+llm:
+  provider: mock
+  router: false
+  model: test
+---
+
+\`\`\`runeflow
+step summarize type=llm {
+  prompt: "Summarize {{ inputs.topic }}"
+  schema: { summary: string }
+}
+
+step draft type=llm {
+  prompt: "Expand on: {{ steps.summarize.summary }}"
+  input: { summary: steps.summarize.summary }
+  schema: { final: string }
+}
+
+output {
+  final: steps.draft.final
+}
+\`\`\`
+`;
+
+  const definition = parseRuneflow(skill);
+  const calls = [];
+  const runtime = {
+    llms: {
+      mock: async ({ step, prompt }) => {
+        calls.push({ id: step.id, prompt });
+        if (step.id === "summarize") return { summary: "a brief summary" };
+        return { final: "expanded result" };
+      },
+    },
+  };
+
+  const result = await assembleRuneflow(definition, "draft", { topic: "runeflow" }, runtime);
+
+  assert.equal(calls.length, 1, "only the pre-step llm ran, not the target");
+  assert.equal(calls[0].id, "summarize");
+  assert.ok(result.includes("a brief summary"), "llm pre-step output resolved in target prompt");
+});
+
+test("assembleRuneflow: respects skip_if on pre-steps", async () => {
+  const skill = `---
+name: skip-if-skill
+version: 0.1
+inputs:
+  skip: boolean
+  topic: string
+outputs:
+  result: string
+llm:
+  provider: mock
+  router: false
+  model: test
+---
+
+\`\`\`runeflow
+step maybe type=tool {
+  tool: mock.maybe
+  skip_if: inputs.skip
+  out: { value: string }
+}
+
+step draft type=llm {
+  prompt: "Topic: {{ inputs.topic }}"
+  schema: { result: string }
+}
+
+output {
+  result: steps.draft.result
+}
+\`\`\`
+`;
+
+  const definition = parseRuneflow(skill);
+  const called = [];
+  const runtime = {
+    tools: {
+      "mock.maybe": async () => { called.push(true); return { value: "ran" }; },
+    },
+  };
+
+  await assembleRuneflow(definition, "draft", { skip: true, topic: "test" }, runtime);
+  assert.equal(called.length, 0, "skipped step did not execute");
+});
+
+test("assembleRuneflow: format json returns structured object", async () => {
+  const definition = parseRuneflow(BASE_SKILL);
+  const runtime = {
+    tools: {
+      "mock.branch": async () => ({ branch: "feat/json-test" }),
+      "mock.diff": async () => ({ summary: "2 files changed" }),
+    },
+  };
+
+  const result = await assembleRuneflow(
+    definition, "draft", { base_branch: "main" }, runtime, { format: "json" },
+  );
+
+  assert.equal(typeof result, "object");
+  assert.equal(result.skill, "test-skill");
+  assert.equal(result.step, "draft");
+  assert.ok(result.prompt.includes("feat/json-test"));
+  assert.ok(result.prompt.includes("2 files changed"));
+  assert.deepEqual(result.schema, { title: "string", body: "string" });
+  assert.ok(typeof result.docs === "string");
+  assert.ok(result.input.branch === "feat/json-test");
+});

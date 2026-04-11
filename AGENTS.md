@@ -89,6 +89,17 @@ When adding or updating examples:
 - show both deterministic tool usage and typed LLM outputs when possible
 - include result passing when it helps explain the model
 
+## Skill Discovery Convention
+
+Project-level workflows live in `.runeflow/skills/`. Any `.runeflow.md` file in that directory is discoverable via `runeflow skills list` and runnable via `runeflow skills run <name>`.
+
+When adding new project-level workflows, place them in `.runeflow/skills/` so agents can find and invoke them without being told the full path. The `AGENTS.md` file in a project should include an entry like:
+
+```
+## Runeflow Skills
+Skills are in `.runeflow/skills/`. Run `runeflow skills list` to see available workflows.
+```
+
 When updating docs:
 
 - keep README focused on public usage

@@ -9,6 +9,39 @@ import { isPlainObject } from "./utils.js";
 
 const STEP_RUNTIME_FIELDS = STEP_STATE_FIELDS;
 
+// ─── "Did you mean?" suggestion helper ───────────────────────────────────────
+
+function editDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function didYouMean(input, candidates) {
+  if (!candidates || candidates.length === 0) return null;
+  const lower = input.toLowerCase();
+  let best = null;
+  let bestDist = Infinity;
+  for (const candidate of candidates) {
+    const dist = editDistance(lower, candidate.toLowerCase());
+    // Only suggest if within 40% edit distance of the longer string
+    const threshold = Math.max(Math.floor(Math.max(input.length, candidate.length) * 0.4), 2);
+    if (dist < bestDist && dist <= threshold) {
+      bestDist = dist;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 export function loadImportedBlocks(imports, options, seen = new Set(), issues = []) {
   const importedBlocks = new Map();
   if (!imports || imports.length === 0) return importedBlocks;
@@ -203,7 +236,11 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
 
   if (segments[0] === "inputs") {
     if (!shapeHasPath(availableInputs, segments.slice(1))) {
-      issues.push(`${location}: unknown input reference '${pathExpression}'`);
+      const field = segments[1];
+      const available = isPlainObject(availableInputs) ? Object.keys(availableInputs) : [];
+      const suggestion = field ? didYouMean(field, available) : null;
+      const hint = suggestion ? ` (did you mean 'inputs.${suggestion}'?)` : available.length ? ` (available: ${available.map((k) => `inputs.${k}`).join(", ")})` : "";
+      issues.push(`${location}: unknown input reference '${pathExpression}'${hint}`);
     }
     return;
   }
@@ -213,7 +250,10 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
     const stepSchema = availableSteps.get(stepId);
 
     if (!stepSchema) {
-      issues.push(`${location}: unknown or forward step reference '${pathExpression}'`);
+      const availableStepIds = [...availableSteps.keys()];
+      const suggestion = stepId ? didYouMean(stepId, availableStepIds) : null;
+      const hint = suggestion ? ` (did you mean 'steps.${suggestion}...'?)` : availableStepIds.length ? ` (available steps: ${availableStepIds.join(", ")})` : "";
+      issues.push(`${location}: unknown or forward step reference '${pathExpression}'${hint}`);
       return;
     }
 
@@ -229,7 +269,11 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
     }
 
     if (!shapeHasPath(stepSchema, rest)) {
-      issues.push(`${location}: unknown step output path '${pathExpression}'`);
+      const field = rest[0];
+      const available = isPlainObject(stepSchema) ? Object.keys(stepSchema) : [];
+      const suggestion = field ? didYouMean(field, available) : null;
+      const hint = suggestion ? ` (did you mean 'steps.${stepId}.${suggestion}'?)` : available.length ? ` (available: ${available.map((k) => `steps.${stepId}.${k}`).join(", ")})` : "";
+      issues.push(`${location}: unknown step output path '${pathExpression}'${hint}`);
     }
     return;
   }
@@ -240,8 +284,14 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
 export function validateSkill(definition, options = {}) {
   const issues = [];
   const warnings = [];
-  
-  const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], options, new Set(), issues);
+
+  // Fall back to definition.sourcePath so relative imports resolve correctly
+  // when the caller doesn't explicitly pass sourcePath in options.
+  const effectiveOptions = options.sourcePath
+    ? options
+    : { ...options, sourcePath: definition.sourcePath ?? undefined };
+
+  const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], effectiveOptions, new Set(), issues);
 
   let workflow;
   try {
@@ -535,8 +585,13 @@ export function validateSkill(definition, options = {}) {
       parallelChildOwners.set(childId, step.id);
 
       const childStep = workflow.steps[childIndex];
-      if (childStep.kind !== "tool") {
-        issues.push(`parallel '${step.id}' child step '${childId}' must be a tool step`);
+      const PARALLEL_ALLOWED_KINDS = new Set(["tool", "llm", "cli"]);
+      if (!PARALLEL_ALLOWED_KINDS.has(childStep.kind)) {
+        issues.push(`parallel '${step.id}' child step '${childId}' must be a tool, llm, or cli step`);
+      }
+
+      if (childStep.kind === "llm" && !childStep.schema && !childStep.llm?.schema) {
+        issues.push(`parallel '${step.id}' child llm step '${childId}' must declare a schema`);
       }
 
       if (childStep.next) {

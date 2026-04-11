@@ -54,6 +54,12 @@ step draft type=llm {
 
     Diff summary:
     {{ steps.get_diff.summary }}
+  input: {
+    branch: steps.get_branch.branch,
+    base_branch: inputs.base_branch,
+    diff_summary: steps.get_diff.summary,
+    changed_files: "{{ steps.get_diff.files }}"
+  }
   schema: { title: string, body: string }
 }
 

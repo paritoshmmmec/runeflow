@@ -291,11 +291,12 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
     });
 
     const skillContent = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
-    const runtimeContent = await fs.readFile(path.join(tempDir, "runtime.js"), "utf8");
 
     assert.ok(skillContent.includes("name: my-skill"));
     assert.ok(skillContent.includes("provider: cerebras"));
-    assert.ok(runtimeContent.includes("createDefaultRuntime"));
+    // runtime.js is no longer written for cloud providers — default runtime activates automatically
+    const runtimeExists = await fs.access(path.join(tempDir, "runtime.js")).then(() => true).catch(() => false);
+    assert.ok(!runtimeExists, "runtime.js should not be written for cloud providers");
   } finally {
     process.chdir(originalCwd);
   }
@@ -482,7 +483,7 @@ export default {
 
   try {
     const output = await captureStdout(() =>
-      runCli(["validate", "./workflow.runeflow.md", "--runtime", "./runtime.js"]),
+      runCli(["validate", "./workflow.runeflow.md", "--runtime", "./runtime.js", "--format", "json"]),
     );
     const validation = JSON.parse(output);
 
@@ -765,6 +766,200 @@ test("runCli init: passes --no-polish flag to runInit", async () => {
 
     // Should not see polish messages
     assert.doesNotMatch(output, /Polishing/, "--no-polish should suppress polish messages");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli inspect-run --format table prints step timeline", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-table-"));
+  const originalCwd = process.cwd();
+  const runId = "run_table_test";
+  const runsDir = path.join(tempDir, ".runeflow-runs");
+
+  await fs.mkdir(runsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(runsDir, `${runId}.json`),
+    JSON.stringify({
+      run_id: runId,
+      status: "success",
+      steps: [
+        { id: "fetch", kind: "tool", status: "success", attempts: 1, started_at: "2026-01-01T00:00:00.000Z", finished_at: "2026-01-01T00:00:00.050Z" },
+        { id: "draft", kind: "llm", status: "success", attempts: 1, started_at: "2026-01-01T00:00:00.050Z", finished_at: "2026-01-01T00:00:01.200Z" },
+      ],
+    }),
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["inspect-run", runId, "--format", "table"]),
+    );
+    assert.match(output, /fetch/);
+    assert.match(output, /draft/);
+    assert.match(output, /tool/);
+    assert.match(output, /llm/);
+    assert.match(output, /success/);
+    assert.match(output, /50ms/);
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli inspect-run --step shows single step artifact", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-step-"));
+  const originalCwd = process.cwd();
+  const runId = "run_step_test";
+  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const stepsDir = path.join(runsDir, runId, "steps");
+
+  await fs.mkdir(stepsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(runsDir, `${runId}.json`),
+    JSON.stringify({ run_id: runId, status: "success", steps: [] }),
+  );
+  await fs.writeFile(
+    path.join(stepsDir, "fetch.json"),
+    JSON.stringify({ id: "fetch", kind: "tool", status: "success", outputs: { value: "ok" } }),
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["inspect-run", runId, "--step", "fetch"]),
+    );
+    const step = JSON.parse(output);
+    assert.equal(step.id, "fetch");
+    assert.equal(step.outputs.value, "ok");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli run --record-fixture writes a fixture file from the run", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-fixture-"));
+  const originalCwd = process.cwd();
+  const fixturePath = path.join(tempDir, "fixture.json");
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: fixture-demo
+description: Fixture recording demo
+version: 0.1
+inputs:
+  name: string
+outputs:
+  greeting: string
+llm:
+  provider: mock-default
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+step greet type=llm {
+  prompt: "Say hello to {{ inputs.name }}."
+  schema: { greeting: string }
+}
+
+output {
+  greeting: steps.greet.greeting
+}
+\`\`\`
+`,
+  );
+
+  const runtimePath = path.join(tempDir, "runtime.js");
+  await fs.writeFile(
+    runtimePath,
+    `export default {
+  llms: {
+    "mock-default": async () => ({ greeting: "Hello, Alice!" }),
+  },
+};`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    await captureStdout(() =>
+      runCli([
+        "run", "workflow.runeflow.md",
+        "--input", '{"name":"Alice"}',
+        "--runtime", "./runtime.js",
+        "--record-fixture", fixturePath,
+      ]),
+    );
+
+    const fixture = JSON.parse(await fs.readFile(fixturePath, "utf8"));
+    assert.deepEqual(fixture.inputs, { name: "Alice" });
+    assert.equal(fixture.expect.status, "success");
+    assert.deepEqual(fixture.expect.outputs, { greeting: "Hello, Alice!" });
+    assert.deepEqual(fixture.mocks.llm.greet, { greeting: "Hello, Alice!" });
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli skills list shows skills from .runeflow/skills/", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-skills-"));
+  const originalCwd = process.cwd();
+  const skillsDir = path.join(tempDir, ".runeflow", "skills");
+
+  await fs.mkdir(skillsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(skillsDir, "open-pr.runeflow.md"),
+    `---
+name: open-pr
+description: Open a pull request from the current branch.
+version: 0.1
+inputs: {}
+outputs: {}
+---
+`,
+  );
+  await fs.writeFile(
+    path.join(skillsDir, "release-notes.runeflow.md"),
+    `---
+name: release-notes
+description: Draft release notes from git log.
+version: 0.1
+inputs: {}
+outputs: {}
+---
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() => runCli(["skills", "list"]));
+    assert.match(output, /open-pr/);
+    assert.match(output, /release-notes/);
+    assert.match(output, /Open a pull request/);
+    assert.match(output, /Draft release notes/);
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli skills list prints message when no skills directory exists", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-noskills-"));
+  const originalCwd = process.cwd();
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() => runCli(["skills", "list"]));
+    assert.match(output, /No skills found/);
   } finally {
     process.chdir(originalCwd);
     await fs.rm(tempDir, { recursive: true, force: true });

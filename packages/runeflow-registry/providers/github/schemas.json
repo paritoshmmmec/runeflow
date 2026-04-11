@@ -1,0 +1,307 @@
+[
+  {
+    "name": "github.get_pr",
+    "description": "Get a pull request by number.",
+    "tags": [
+      "github",
+      "pull-requests"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "number": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "owner",
+        "repo",
+        "number"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "draft": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "state",
+        "url",
+        "author",
+        "base",
+        "head"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "github.create_pr",
+    "description": "Create a pull request.",
+    "tags": [
+      "github",
+      "pull-requests"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string",
+          "description": "Branch to merge from."
+        },
+        "base": {
+          "type": "string",
+          "description": "Branch to merge into."
+        },
+        "draft": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "owner",
+        "repo",
+        "title",
+        "head",
+        "base"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "number"
+        },
+        "url": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url",
+        "state"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "github.merge_pr",
+    "description": "Merge a pull request.",
+    "tags": [
+      "github",
+      "pull-requests"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "number": {
+          "type": "number"
+        },
+        "merge_method": {
+          "type": "string",
+          "description": "merge, squash, or rebase."
+        },
+        "commit_message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "repo",
+        "number"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "merged": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "merged",
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "github.add_label",
+    "description": "Add labels to an issue or pull request.",
+    "tags": [
+      "github",
+      "issues",
+      "pull-requests"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "number": {
+          "type": "number"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "owner",
+        "repo",
+        "number",
+        "labels"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "labels"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "github.create_issue",
+    "description": "Create a GitHub issue.",
+    "tags": [
+      "github",
+      "issues"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assignees": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "owner",
+        "repo",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "number"
+        },
+        "url": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url",
+        "state"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

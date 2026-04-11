@@ -2,9 +2,9 @@
 
 # ⚡ Runeflow
 
-**LLM apps break because control flow lives inside prompts.**
+**Stop putting workflow logic inside prompts.**
 
-**Runeflow fixes that.** One Markdown file. Typed workflow. The runtime runs the plan, the LLM does its part.
+Runeflow lets you build executable AI skills in Markdown. Keep guidance readable, control flow typed, and execution owned by the runtime.
 
 [![npm version](https://img.shields.io/npm/v/runeflow?color=blueviolet)](https://www.npmjs.com/package/runeflow)
 [![CI](https://github.com/paritoshmmmec/runeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/paritoshmmmec/runeflow/actions/workflows/ci.yml)
@@ -12,92 +12,107 @@
 [![node](https://img.shields.io/badge/node-%3E%3D20-green)](#)
 
 </div>
----
-
-## 📊 Current State
-
-Runeflow is in **active development (v0.4.x)**. It is stable for CLI automation and agent-pre-processing (Assemble mode). We use it to build and maintain the project itself.
-
-**Core Philosophy:**
-- **Human-first, LLM-second**: Workflows should be readable and executable by humans without an LLM.
-- **Typed & Validated**: Reference checking and schema enforcement happen *before* tokens are spent.
-- **Small Runtime**: Minimal abstractions, explicit control flow, and no hidden "magic" orchestration.
 
 ---
 
-## Contents
+## The problem
 
-- [The Problem](#-the-problem)
-- [The Solution](#-the-solution)
-- [Benchmarks](#-benchmarks)
-- [Quickstart](#-quickstart)
-  - [runeflow init](#step-3--generate-a-runeflowmd-with-runeflow-init)
-- [Runeflow File Shape](#-runeflow-file-shape)
-- [Step Kinds](#-step-kinds)
-- [Expressions](#-expressions)
-- [Built-in Tools](#-built-in-tools)
-- [CLI Reference](#️-cli-reference)
-- [Writing a Runtime](#️-writing-a-runtime)
-- [Examples](#-examples)
-- [Zero-Config MCP & Composio Wiring](#-zero-config-mcp--composio-wiring)
-- [runeflow-registry](#-runeflow-registry)
-- [Extending the Tool Registry](#-extending-the-tool-registry)
-- [Caching](#-caching)
-- [Trust Model](#-trust-model)
-- [Roadmap](#️-roadmap)
-- [Integration Modes](#-integration-modes)
-- [Contributing](#-contributing)
-- [License](#-license)
+Prompt-based automations break in predictable ways. The model decides what to call, in what order, with what inputs. Retries are ad hoc. Outputs are unvalidated. Runs are invisible after the fact. When something goes wrong, there's nothing to inspect.
+
+The root cause is that workflow logic — sequencing, branching, validation, tool calls — is hiding inside the prompt where it doesn't belong.
+
+## The solution
+
+Runeflow moves execution semantics out of the prompt and into a small runtime. One `.runeflow.md` file combines human-readable guidance with a typed, executable workflow block. The runtime owns sequencing, branching, retries, tool execution, and schema validation. The LLM sees only what it needs: a tight prompt, the relevant docs, and the output schema.
+
+Prompts are good for judgment and language. They're a bad place to hide workflow logic. Runeflow puts workflow logic back in code, while keeping authoring lightweight and human-readable.
 
 ---
 
-## 🤔 The Problem
+## Why it works
 
-Most AI workflows are just prompt text. The model informally decides what to do, which tools to call, and in what order. That breaks down fast:
+**Readable** — Markdown-first workflows live in your repo and review cleanly in diffs. Guidance for humans and execution logic for the runtime, in one file.
 
-- control flow is implicit and unreliable
-- tool calls and retries are ad hoc
-- outputs are hard to validate
-- runs are impossible to inspect after the fact
-- orchestration instructions bloat every prompt
+**Reliable** — Validation, schemas, retries, and branching happen before tokens are wasted. Static preflight catches broken references and type mismatches before execution.
 
-## 💡 The Solution
+**Agent-friendly** — Precompute context with `runeflow assemble` and hand agents only the step they need. This is how the -82% input token reduction works in practice.
 
-Runeflow moves execution semantics out of the prompt and into the runtime. One hybrid `.runeflow.md` file combines human-readable guidance with a typed, executable workflow block. The runtime owns sequencing, branching, retries, tool execution, and schema validation. The LLM sees only what it needs: a tight prompt, the relevant docs, and the output schema.
+---
 
-## 📊 Benchmarks
+## What it's for
+
+Runeflow is a strong fit for repo-local developer workflows with light-to-moderate AI involvement:
+
+- PR drafting and code review summaries
+- Release notes generation
+- Issue creation from CI failures
+- Agent pre-processing (assemble mode)
+- Scheduled repo automation
+
+It works well alongside existing agents (Claude Code, Codex, Cursor) rather than replacing them.
+
+## What it's not
+
+- A general-purpose DAG engine
+- A no-code automation platform
+- A multi-agent autonomy framework
+- A replacement for app backends or job systems
+- A visual workflow builder
+
+---
+
+## Benchmarks
 
 Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 
-| Task | Input tokens (raw) | Input tokens (Runeflow) | Reduction |
+| Task | Raw input tokens | Runeflow input tokens | Reduction |
 |---|---|---|---|
 | adyntel-automation | 810 | 128 | **-84%** 🔥 |
 | addresszen-automation | 817 | 150 | **-82%** 🔥 |
 | 3p-updates | 825 | 508 | **-38%** |
 | open-pr | 219 | 236 | neutral |
 
-> On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
+On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
 
-> 🤙 The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.runeflow.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
+> The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.runeflow.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
 
 ---
 
-## 🚀 Quickstart
+## Contents
+
+- [Quickstart](#quickstart)
+- [File shape](#file-shape)
+- [Step kinds](#step-kinds)
+- [Expressions](#expressions)
+- [Built-in tools](#built-in-tools)
+- [CLI reference](#cli-reference)
+- [Writing a runtime](#writing-a-runtime)
+- [Assemble mode](#assemble-mode)
+- [MCP server mode](#mcp-server-mode)
+- [Zero-config MCP & Composio wiring](#zero-config-mcp--composio-wiring)
+- [runeflow-registry](#runeflow-registry)
+- [Extending the tool registry](#extending-the-tool-registry)
+- [Caching](#caching)
+- [Trust model](#trust-model)
+
+---
+
+## Quickstart
 
 > Requires Node >= 20.
 
-**Step 1 — Install**
+**Install**
 
 ```bash
 npm install -g runeflow
 ```
 
-**Step 2 — Install a provider package and add your API key**
+**Install a provider and add your key**
 
 Runeflow uses the [Vercel AI SDK](https://sdk.vercel.ai) under the hood. Install the package for your provider:
 
 ```bash
-# pick one (or more)
+# pick one
 npm install @ai-sdk/cerebras    # CEREBRAS_API_KEY  — free tier at cloud.cerebras.ai
 npm install @ai-sdk/openai      # OPENAI_API_KEY
 npm install @ai-sdk/anthropic   # ANTHROPIC_API_KEY
@@ -106,61 +121,21 @@ npm install @ai-sdk/mistral     # MISTRAL_API_KEY
 npm install @ai-sdk/google      # GOOGLE_GENERATIVE_AI_API_KEY
 ```
 
-Add your key to a `.env` file:
-
 ```bash
 echo "CEREBRAS_API_KEY=your-key-here" > .env
 ```
 
-**Step 3 — Generate a `.runeflow.md` with `runeflow init`**
+**Generate a skill with `runeflow init`**
 
-Run `runeflow init` inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.runeflow.md` files — and generates a real, immediately-runnable `.runeflow.md` tailored to what it finds.
+Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.runeflow.md` files — and generates a ready-to-run `.runeflow.md` tailored to what it finds.
 
 ```bash
 runeflow init
 ```
 
-If a cloud API key is present in your environment, the generated skill is polished by that provider. If not, a small local model (`Qwen2.5-0.5B`) is downloaded to `~/.runeflow/models/` and used instead — no sign-up required.
+If a cloud API key is present, the generated skill is polished by that provider. If not, a small local model (`Qwen2.5-0.5B`) is downloaded to `~/.runeflow/models/` and used instead — no sign-up required.
 
-**Flags:**
-
-```bash
-runeflow init [--name <slug>] [--context <hint>] [--template <id>]
-              [--provider <provider>] [--model <model>]
-              [--no-local-llm] [--no-polish] [--force]
-```
-
-| Flag | What it does |
-|---|---|
-| `--context <hint>` | Extra hint for template selection, e.g. `"deploy to AWS"` |
-| `--template <id>` | Force a specific template (bypasses heuristics) |
-| `--no-local-llm` | Skip local model download; write `.runeflow.md` with a placeholder provider |
-| `--no-polish` | Skip LLM polish even when a cloud key is present |
-| `--force` | Overwrite existing `.runeflow.md` and `runtime.js` files |
-| `--name <slug>` | Override the generated filename |
-
-**Built-in templates:**
-
-| ID | When selected |
-|---|---|
-| `open-pr` | GitHub integration or `push` script detected |
-| `release-notes` | `release`/`version` scripts or release-related commits |
-| `test-and-lint` | `test`/`lint` scripts detected |
-| `deploy` | `deploy`/`build` scripts or CI provider present |
-| `notify-slack` | Slack SDK detected |
-| `stripe-payment` | Stripe SDK detected |
-| `linear-issue` | Linear SDK detected |
-| `generic-llm-task` | Default fallback |
-
-**Conversion mode:** if your project contains existing Claude-style Markdown files (files with `<system>` blocks, `## Tools` sections, or `Input:`/`Output:` annotations), `runeflow init` detects them and converts them to `.runeflow.md` format instead of generating from a template.
-
----
-
-**Or write a `.runeflow.md` by hand:**
-
-A `.runeflow.md` is one Markdown file. The frontmatter declares inputs/outputs, the prose is guidance for the LLM, and the `runeflow` block is the executable workflow.
-
-Create `draft-pr.runeflow.md` inside any git repo:
+**Or write one by hand:**
 
 ````md
 ---
@@ -209,27 +184,13 @@ output {
 ```
 ````
 
-**Step 4 — Run it**
-
-The default runtime handles all 6 providers (Cerebras, OpenAI, Anthropic, Groq, Mistral, Google) automatically — no extra config needed.
-
-Export your key and run:
+**Run it**
 
 ```bash
-export CEREBRAS_API_KEY=your-key-here
-
-runeflow run ./draft-pr.runeflow.md \
-  --input '{"base_branch":"main"}' \
-  --runtime node_modules/runeflow/src/default-runtime.js
+runeflow run ./draft-pr.runeflow.md --input '{"base_branch":"main"}'
 ```
 
-Or load it from a `.env` file using Node's `--env-file` flag:
-
-```bash
-node --env-file=.env node_modules/.bin/runeflow run ./draft-pr.runeflow.md \
-  --input '{"base_branch":"main"}' \
-  --runtime node_modules/runeflow/src/default-runtime.js
-```
+The default runtime handles all 6 providers automatically — no `--runtime` flag needed. Keys are resolved from `process.env` or a `.env` file in the current directory.
 
 Output:
 
@@ -240,31 +201,26 @@ Output:
 }
 ```
 
-Every step also writes a JSON artifact to `.runeflow-runs/` — inputs, outputs, timing, and errors, all inspectable after the fact.
+Every step writes a JSON artifact to `.runeflow-runs/` — inputs, outputs, timing, and errors, all inspectable after the fact.
 
-**Step 5 — Validate before you run**
-
-Validation is static — no API calls, no git. Catches broken references and schema mismatches before execution:
+**Validate before you run**
 
 ```bash
 runeflow validate ./draft-pr.runeflow.md
 # { "valid": true, "issues": [] }
 ```
 
-**Step 6 — Discover available tools**
-
-```bash
-runeflow tools list
-runeflow tools inspect git.diff_summary
-```
+Static — no API calls, no git. Catches broken references and schema mismatches before execution.
 
 ---
 
-## 📄 Runeflow File Shape
+## File shape
 
-A `.runeflow.md` file is a standard Markdown document — YAML frontmatter, human-readable guidance, and a fenced `runeflow` block that the runtime executes. The `.runeflow.md` suffix is a convention, not a requirement. Any `.md` file containing a `runeflow` block is valid.
+A `.runeflow.md` is a standard Markdown document. YAML frontmatter declares inputs and outputs. The prose is guidance for the LLM. The `runeflow` block is the executable workflow.
 
-```md
+The `.runeflow.md` suffix is a convention, not a requirement. Any `.md` file containing a `runeflow` block is valid.
+
+````md
 ---
 name: prepare-pr
 description: Prepare a pull request draft.
@@ -305,20 +261,20 @@ output {
 
 ---
 
-## 🧱 Step Kinds
+## Step kinds
 
 | Kind | What it does |
 |---|---|
 | `tool` | Calls a registered tool, validates output against `out` schema |
-| `parallel` | Runs a contiguous group of `tool` steps concurrently, joins their outputs |
+| `parallel` | Runs a group of `tool`, `llm`, or `cli` steps concurrently, joins outputs |
 | `llm` | Calls an LLM handler, validates output against `schema` |
 | `cli` | Runs a shell command, captures `stdout`, `stderr`, `exit_code` |
-| `human_input` | Collects an answer from `--prompt`, a prompt handler, or halts for resume |
+| `human_input` | Collects an answer from `--prompt`, a handler, or halts for resume |
 | `transform` | Runs a JS expression over resolved `input`, validates against `out` |
 | `branch` | Evaluates an expression, routes to `then` or `else` step |
-| `block` | Instantiates a defined `block` template with overriding properties |
+| `block` | Instantiates a named `block` template |
 
-Control flow: `retry=N`, `fallback=<step>`, `next=<step>`, `skip_if: <expr>`, terminal `fail`.
+Control flow: `retry=N`, `retry_delay`, `retry_backoff`, `fallback=<step>`, `next=<step>`, `skip_if: <expr>`, terminal `fail`.
 
 ### tool
 
@@ -335,7 +291,6 @@ step check type=tool {
 ```runeflow
 parallel gather {
   steps: [fetch_slack, fetch_drive]
-  out: { results: [any] }
 }
 
 step fetch_slack type=tool {
@@ -349,7 +304,7 @@ step fetch_drive type=tool {
 }
 ```
 
-`parallel` only fans out `tool` steps. Child tool steps must be declared immediately after the `parallel` block in the same order, and they may not reference each other.
+Fans out `tool`, `llm`, and `cli` steps concurrently. Child steps must be declared immediately after the `parallel` block in matching order and may not reference each other. `llm` children must declare a `schema`.
 
 ### llm
 
@@ -386,7 +341,6 @@ branch check {
 ```runeflow
 step create_pr type=cli cache=false {
   command: "gh pr create --title '{{ steps.draft.title }}' --base {{ inputs.base_branch }}"
-  out: { stdout: string, stderr: string, exit_code: number }
 }
 ```
 
@@ -416,9 +370,28 @@ step greet type=block {
 }
 ```
 
+Blocks can also be imported from another file:
+
+```runeflow
+import blocks from "./shared/pr-blocks.runeflow.md"
+
+step check type=block {
+  block: check_file_exists
+}
+```
+
+### fail
+
+```runeflow
+step abort type=fail {
+  message: "Validation failed for {{ inputs.pr_number }}"
+  data: { pr_number: inputs.pr_number, reason: steps.check.reason }
+}
+```
+
 ---
 
-## 🔤 Expressions
+## Expressions
 
 String fields support `{{ expr }}` interpolation. Bare fields support expression syntax.
 
@@ -434,7 +407,7 @@ String fields support `{{ expr }}` interpolation. Bare fields support expression
 
 ---
 
-## 🔧 Built-in Tools
+## Built-in tools
 
 | Tool | Description |
 |---|---|
@@ -445,68 +418,81 @@ String fields support `{{ expr }}` interpolation. Bare fields support expression
 | `git.tag_list` | List tags sorted by version, newest first |
 | `file.exists` | Check if a path exists |
 | `file.read` | Read a file's contents |
-| `file.write` | Write content to a file (creates dirs if needed) |
+| `file.write` | Write content to a file |
 | `util.complete` | Pass-through — returns its input as output |
 | `util.fail` | Return a structured failure message |
 
 ```bash
-# See all tools including registry tools
 runeflow tools list
-
-# Full input/output schema for any tool
 runeflow tools inspect git.diff_summary
 ```
 
 ---
 
-## 🖥️ CLI Reference
+## CLI reference
 
 ```bash
 runeflow init [--name <name>] [--context <hint>] [--template <id>]
               [--provider <provider>] [--model <model>]
               [--no-local-llm] [--no-polish] [--force]
-runeflow validate <file> [--runtime ./runtime.js]
-runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
+runeflow validate <file> [--runtime ./runtime.js] [--format json]
+runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js]
+            [--runs-dir ./.runeflow-runs] [--force]
+            [--record-fixture <path>]
+            [--telemetry] [--telemetry-output <path>]
 runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
-runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--prompt '{"step":"answer"}']
-runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
-runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
+runeflow test <file> --fixture <fixture.json> [--runtime ./runtime.js]
+            [--runs-dir ./.runeflow-runs]
+runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs]
+               [--prompt '{"step":"answer"}']
+runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js]
+              [--runs-dir ./.runeflow-runs]
+              [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
+runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js]
+                 [--output context.md] [--format markdown|json]
 runeflow inspect-run <run-id> [--runs-dir ./.runeflow-runs]
+                    [--step <step-id>] [--format table|json]
+runeflow build <description> [--provider <p>] [--model <m>] [--out <file>] [--runtime ./runtime.js]
 runeflow import <file> [--output converted.runeflow.md]
 runeflow tools list [--runtime ./runtime.js]
 runeflow tools inspect <tool-name> [--runtime ./runtime.js]
+runeflow skills list
+runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 ```
 
-`init` inspects the current directory and generates a ready-to-run `.runeflow.md`. It detects installed SDKs, git history, CI config, and existing `.runeflow.md` files to pick the best template. Pass `--context` to give it a hint, `--template` to force a specific one, or `--no-local-llm` to skip the local model download when no cloud key is present.
+`init` — inspects the current directory and generates a ready-to-run `.runeflow.md`. Detects installed SDKs, git history, CI config, and existing `.runeflow.md` files to pick the best template. Pass `--context` for a hint, `--template` to force one, or `--no-local-llm` to skip the local model download.
 
-`dryrun` validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. No tool calls, no LLM calls, no shell commands. Shows exactly what each step *would* do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders (e.g. `"<string>"`, `0`, `false`) derived from the output schema.
+`dryrun` — validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. Shows exactly what each step would do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders derived from the output schema.
 
-```bash
-runeflow dryrun ./draft-pr.runeflow.md --input '{"base_branch":"main"}'
-```
+`test` — runs a skill against a fixture with all LLM and tool calls mocked. Write fixtures by hand or generate them from a real run with `run --record-fixture <path>`.
 
-```json
-{
-  "valid": true,
-  "steps": [
-    { "id": "current_branch", "type": "tool", "tool": "git.current_branch", "with": {} },
-    { "id": "summarize_diff", "type": "tool", "tool": "git.diff_summary", "with": { "base": "main" } },
-    { "id": "draft_pr", "type": "llm", "prompt": "Draft a PR for <string> targeting main..." }
-  ]
-}
-```
+`resume` — reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
 
-`resume` reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
+`watch` — runs a `.runeflow.md` on a cron schedule, on file changes, or both.
 
-`watch` runs a `.runeflow.md` on a cron schedule, on file changes, or both. It reuses the normal `run` path, so artifacts, prompts, validation, and runtime loading behave the same way.
+`assemble` — executes all steps before a target `llm` step (tool, cli, transform, and any earlier llm steps), resolves the prompt with real values, and writes a clean Markdown context file for an agent to load. If earlier llm steps exist, they run and consume tokens. See [Assemble mode](#assemble-mode).
 
-`assemble` runs all tool/transform steps before a target `llm` step, resolves the prompt with real values, and writes a clean Markdown context file for an agent (Claude Code, Codex, Cursor) to load instead of the raw `.runeflow.md`.
+`inspect-run` — reads a run artifact by run ID. Use `--format table` for a compact step timeline. Use `--step <id>` to drill into a single step's artifact.
+
+`build` — compiles an English description into a `.runeflow.md` using the LLM execution path.
+
+`run --record-fixture <path>` — writes a test fixture JSON after a real run, capturing inputs, per-step tool and LLM outputs as mocks, and the final status.
+
+`run --telemetry` — emits one OTLP JSON span per step to stderr after the run. Each span includes step id, kind, status, duration, attempts, and token usage. Redirect with `--telemetry-output <path>` or pipe stderr into any OpenTelemetry collector. No SDK dependency required.
+
+`skills list` / `skills run <name>` — scans `.runeflow/skills/` and runs skills by name. See [Skill discovery](#skill-discovery).
 
 ---
 
-## ✍️ Writing a Runtime
+## Writing a runtime
 
-The default runtime is powered by the [Vercel AI SDK](https://sdk.vercel.ai) and supports 6 providers out of the box. Install the packages for the providers you need, then use `createDefaultRuntime()`:
+The default runtime activates automatically when no `--runtime` flag is passed. It supports 6 providers via the [Vercel AI SDK](https://sdk.vercel.ai). Install the packages for the providers you need:
+
+```bash
+npm install @ai-sdk/cerebras   # or openai, anthropic, groq, mistral, google
+```
+
+To use it explicitly in code:
 
 ```js
 // runtime.js
@@ -523,9 +509,9 @@ export default createDefaultRuntime();
 | `mistral` | `@ai-sdk/mistral` | `MISTRAL_API_KEY` |
 | `google` | `@ai-sdk/google` | `GOOGLE_GENERATIVE_AI_API_KEY` |
 
-Keys are resolved automatically via the auth waterfall: `process.env` → `.env` file → `~/.runeflow/credentials.json`. A clear error is thrown before execution if a key is missing.
+Keys are resolved via the auth waterfall: `process.env` → `.env` file → `~/.runeflow/credentials.json`.
 
-To add a custom provider or override behavior, extend the base runtime:
+To add a custom provider or override behavior:
 
 ```js
 import { createDefaultRuntime } from "runeflow";
@@ -536,52 +522,24 @@ export default {
   ...base,
   llms: {
     ...base.llms,
-    // add any provider the AI SDK supports, or a fully custom handler
-    ollama: async ({ llm, prompt, input, schema, docs, step, state, context }) => {
+    ollama: async ({ llm, prompt, input, schema, docs }) => {
       // call your LLM, return an object matching schema
       return { title: "..." };
     },
   },
   hooks: {
-    beforeStep: async ({ runId, step, state }) => {},            // optional, can abort via { abort: true, reason }
-    afterStep: async ({ runId, step, stepRun, state }) => {},    // optional, non-fatal
-    onStepError: async ({ runId, step, error, attempts, state }) => {},  // optional, non-fatal
+    beforeStep: async ({ runId, step, state }) => {},
+    afterStep: async ({ runId, step, stepRun, state }) => {},
+    onStepError: async ({ runId, step, error, attempts, state }) => {},
   },
 };
 ```
 
-Runtime modules can also expose `plugins`, which lets tools and their schemas plug into Runeflow without being hard-wired into core runtime code:
+`beforeStep` can abort a run by returning `{ abort: true, reason: "..." }`.
 
-```js
-import { createDefaultRuntime, createMcpToolPlugin } from "runeflow";
+### Runtime plugins
 
-export default {
-  ...createDefaultRuntime(),
-  plugins: [
-    createMcpToolPlugin({
-      serverName: "docs",
-      tools: [
-        {
-          name: "search",
-          inputSchema: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-          },
-        },
-      ],
-      callTool: async ({ input }) => ({
-        content: [input],
-        isError: false,
-      }),
-    }),
-  ],
-};
-```
-
-Plugin-contributed tool schemas are available to `runeflow run`, `runeflow validate`, and `runeflow tools inspect` when you pass the same `--runtime` module.
-
-For a real MCP stdio server, use `createMcpClientPlugin(...)` and let Runeflow discover tools from `tools/list`:
+Plugins let tools and their schemas plug in without being hard-wired into core:
 
 ```js
 import { createDefaultRuntime, createMcpClientPlugin } from "runeflow";
@@ -599,29 +557,22 @@ export default {
 };
 ```
 
-Discovered MCP input schemas are normalized into Runeflow's validator shape. When a tool does not publish a structured output schema, adapter plugins fall back to a standard raw result envelope:
+When a tool does not publish a structured output schema, adapter plugins fall back to a standard envelope:
 
 ```js
-{
-  content: [any],
-  isError: boolean,
-  raw: any
-}
+{ content: [any], isError: boolean, raw: any }
 ```
 
-Composio fits the same plugin surface:
+Composio fits the same surface:
 
 ```js
 import { createDefaultRuntime, createComposioClientPlugin } from "runeflow";
 
 const composioPlugin = await createComposioClientPlugin({
   toolkits: ["linear"],
-  toolkitVersions: {
-    linear: process.env.COMPOSIO_TOOLKIT_VERSION_LINEAR,
-  },
   executeDefaults: {
     connectedAccountId: process.env.COMPOSIO_CONNECTED_ACCOUNT_ID,
-    userId: process.env.COMPOSIO_USER_ID ?? process.env.COMPOSIO_ENTITY_ID,
+    userId: process.env.COMPOSIO_USER_ID,
   },
 });
 
@@ -631,31 +582,89 @@ export default {
 };
 ```
 
-The default Composio client plugin expects `COMPOSIO_API_KEY` and `@composio/core` for live discovery/execution. For authenticated tools, Composio also expects a connected account id and user id (`userId`; `entityId` / `entity_id` are accepted as aliases by Runeflow), and practical live execution usually wants a pinned toolkit version such as `COMPOSIO_TOOLKIT_VERSION_GITHUB`. For tests or custom auth flows, you can inject your own client with `createClient` or `client`.
+---
+
+## Assemble mode
+
+`runeflow assemble` is how Runeflow works alongside existing agents rather than replacing them.
+
+You run `runeflow assemble` before invoking an agent. Runeflow executes all steps before the target — tool calls, cli commands, transforms, and any earlier llm steps — resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file instead of the raw `.runeflow.md`. It sees only what it needs for one step.
+
+Note: if your workflow has llm steps before the target, those run and consume tokens during assembly. If you want zero-token assembly, structure your workflow so all pre-steps are tool, cli, or transform steps.
+
+```bash
+runeflow assemble ./draft-pr.runeflow.md \
+  --step draft \
+  --input '{"base_branch":"main"}' \
+  --output context.md
+```
+
+The output contains the resolved prompt, operator docs, resolved input, and output schema. No `runeflow` block, no tool wiring, no DSL:
+
+```md
+# draft-pr — assembled context for `draft`
+
+## Guidance
+Write a concise PR title and body...
+
+## Your task
+Draft a PR for feat/my-feature → main.
+Changed files: ["src/runtime.js", "src/cli.js"]
+Diff: src/runtime.js | 45 +++...
+
+## Output schema
+{ "title": "string", "body": "string" }
+```
+
+This is how the -82% token reduction works in practice — the agent never sees orchestration instructions.
+
+Best for: Claude Code, Codex, Cursor, or any agent that reads files as context. Works today with zero agent integration required.
 
 ---
 
-## 📦 Examples
+## MCP server mode
 
-| File | What it shows |
-|---|---|
-| [`examples/open-pr.runeflow.md`](./examples/open-pr.runeflow.md) | PR prep — tool steps + LLM |
-| [`examples/open-pr-gh.runeflow.md`](./examples/open-pr-gh.runeflow.md) | Full PR open — `cli` step with `gh pr create` |
-| [`examples/review-draft.runeflow.md`](./examples/review-draft.runeflow.md) | Code review notes — step-level LLM override |
-| [`examples/release-notes.runeflow.md`](./examples/release-notes.runeflow.md) | Release notes — `transform` + `const` + LLM |
-| [`examples/block-demo.runeflow.md`](./examples/block-demo.runeflow.md) | Reusable block templates |
-| [`examples/composio-github.runeflow.md`](./examples/composio-github.runeflow.md) | Composio adapter — GitHub API via plugin |
+`runeflow-mcp` exposes `runeflow_run` and `runeflow_validate` as MCP tools. Any MCP-compatible agent calls them directly — no preprocessing step, no file handoff.
+
+```bash
+npm install -g runeflow-mcp
+```
+
+Add to your MCP config (`.mcp.json` for Claude Code):
+
+```json
+{
+  "mcpServers": {
+    "runeflow": {
+      "command": "npx",
+      "args": ["runeflow-mcp"],
+      "env": {
+        "CEREBRAS_API_KEY": "${CEREBRAS_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+The agent never sees the `.runeflow.md` internals. It gets back `{ status, run_id, outputs }`.
 
 ---
 
-## 🔌 Zero-Config MCP & Composio Wiring
+## Integration modes
 
-There are two ways to wire external tools into a `.runeflow.md`:
+| Mode | How | Best for |
+|---|---|---|
+| Top-level executor | `runRuneflow()` / `runeflow run` | Scripts, CI/CD, backends |
+| Assemble | `runeflow assemble` → agent loads context file | Claude Code, Codex, Cursor |
+| MCP server | `runeflow-mcp` exposes `runeflow_run` as MCP tool | Any MCP-compatible agent |
 
-1. **Frontmatter blocks** — declare `mcp_servers` or `composio` directly in the file. No separate runtime file needed. Good for self-contained workflows.
-2. **Runtime plugins** — use `createMcpClientPlugin` / `createComposioClientPlugin` in a `runtime.js` file. Good for sharing tool config across multiple `.runeflow.md` files. See [Writing a Runtime](#️-writing-a-runtime).
+---
 
-### `mcp_servers` (frontmatter option)
+## Zero-config MCP & Composio wiring
+
+Declare `mcp_servers` or `composio` directly in frontmatter — no separate runtime file needed.
+
+### `mcp_servers`
 
 ````md
 ---
@@ -669,6 +678,9 @@ mcp_servers:
     headers:
       Authorization: "Bearer ${MY_API_TOKEN}"
 ---
+````
+
+> `${MY_API_TOKEN}` uses env var interpolation. By default only a curated allowlist of known keys is expanded — add yours with `RUNEFLOW_ENV_ALLOWLIST=MY_API_TOKEN` or use an already-allowlisted name like `GITHUB_TOKEN`. See [Trust model](#trust-model) for details.
 
 ```runeflow
 step read type=tool {
@@ -677,11 +689,10 @@ step read type=tool {
   out: { content: string }
 }
 ```
-````
 
-Tools from each server are available as `mcp.<server-name>.<tool-name>` in your steps. Runeflow connects, discovers tools via `tools/list`, and cleans up after the run automatically.
+Tools are available as `mcp.<server-name>.<tool-name>`. Runeflow connects, discovers tools, and cleans up after the run automatically.
 
-### `composio` (frontmatter option)
+### `composio`
 
 ````md
 ---
@@ -692,23 +703,15 @@ composio:
     userId: ${COMPOSIO_USER_ID}
     connectedAccountId: ${COMPOSIO_CONNECTED_ACCOUNT_ID}
 ---
-
-```runeflow
-step create_issue type=tool {
-  tool: composio.linear.create_issue
-  with: { title: steps.draft.title }
-  out: { content: [any], isError: boolean, raw: any }
-}
-```
 ````
 
 Requires `COMPOSIO_API_KEY` and `npm install @composio/core`. Tools are available as `composio.<toolkit>.<tool>`.
 
 ---
 
-## 📦 runeflow-registry
+## runeflow-registry
 
-Official tool registry with schemas + implementations for common providers.
+Official tool registry with schemas and implementations for common providers.
 
 ```bash
 npm install runeflow-registry
@@ -742,11 +745,11 @@ export default {
 | `slack` | `@slack/web-api` | `slack.post_message`, `slack.get_channel_history` |
 | `notion` | `@notionhq/client` | `notion.create_page`, `notion.query_database` |
 
+When `runeflow-registry` is installed, its schemas are picked up automatically by `runeflow tools list` and `runeflow validate` — no registry directory needed.
+
 ---
 
-
-
-The built-in registry ships with the package. You can add your own tool schemas two ways:
+## Extending the tool registry
 
 **Project-level directory** — drop JSON files in `<project>/registry/tools/`. They merge on top of the built-in registry automatically:
 
@@ -773,34 +776,49 @@ The built-in registry ships with the package. You can add your own tool schemas 
 **Programmatic** — pass `toolRegistry` to `runRuneflow` or `validateRuneflow`:
 
 ```js
-import { runRuneflow } from "runeflow";
-
 await runRuneflow(definition, inputs, runtime, {
   toolRegistry: [
-    {
-      name: "stripe.charge",
-      inputSchema: { ... },
-      outputSchema: { ... },
-    },
+    { name: "stripe.charge", inputSchema: { ... }, outputSchema: { ... } },
   ],
 });
 ```
 
-The runtime validates tool inputs against `inputSchema` and outputs against `outputSchema` automatically.
+---
+
+## Skill discovery
+
+Project-level skills live in `.runeflow/skills/`. Any `.runeflow.md` file there is discoverable:
+
+```bash
+runeflow skills list
+runeflow skills run draft-pr --input '{"base_branch":"main"}'
+```
+
+Add an entry to your `AGENTS.md` so agents can find and invoke skills without being told the full path:
+
+```md
+## Runeflow Skills
+Skills are in `.runeflow/skills/`. Run `runeflow skills list` to see available workflows.
+```
 
 ---
 
-Every run writes `.runeflow-runs/<run_id>.json` and per-step artifacts. Includes inputs, outputs, status, timing, and errors.
+## Examples
 
-Run statuses: `running` → `success` | `halted_on_error` | `halted_on_input` | `failed`
-
-`halted_on_error` means a step failed with no fallback. The artifact includes `halted_step_id` so `runeflow resume` knows where to restart.
-
-`halted_on_input` means a `human_input` step needs an answer. The run artifact includes `pending_input` with the resolved prompt and choices.
+| File | What it shows |
+|---|---|
+| [`examples/open-pr.runeflow.md`](./examples/open-pr.runeflow.md) | PR prep — tool steps + LLM |
+| [`examples/open-pr-gh.runeflow.md`](./examples/open-pr-gh.runeflow.md) | Full PR open — `cli` step with `gh pr create` |
+| [`examples/review-draft.runeflow.md`](./examples/review-draft.runeflow.md) | Code review notes — step-level LLM override |
+| [`examples/release-notes.runeflow.md`](./examples/release-notes.runeflow.md) | Release notes — `transform` + `const` + LLM |
+| [`examples/block-demo.runeflow.md`](./examples/block-demo.runeflow.md) | Reusable block templates |
+| [`examples/import-demo.runeflow.md`](./examples/import-demo.runeflow.md) | Cross-file block imports |
+| [`examples/triage-issues.runeflow.md`](./examples/triage-issues.runeflow.md) | Issue triage — `branch` + `transform` + LLM classification |
+| [`examples/composio-github.runeflow.md`](./examples/composio-github.runeflow.md) | Composio adapter — GitHub API via plugin |
 
 ---
 
-## ⚡ Caching
+## Caching
 
 Every step records an `input_hash`. On subsequent runs with `priorSteps`, steps whose resolved inputs haven't changed are replayed from cache. Add `cache=false` to opt out:
 
@@ -813,148 +831,30 @@ step push type=tool cache=false {
 
 ---
 
-## 🔒 Trust Model
+## Trust model
 
 - `.runeflow.md` files define `transform` expressions — treat them as trusted code in the host process
-- `transform` runs via `new Function`. Set `RUNEFLOW_DISABLE_TRANSFORM=1` to block transform steps
-- `cli` steps run shell commands via `sh -c` (or `cmd /c` on Windows) — treat `.runeflow.md` files as executable code
+- `transform` runs via `vm.runInNewContext` with a restricted context (no `process`, no `require`, no `fs`). Set `RUNEFLOW_DISABLE_TRANSFORM=1` to block transform steps entirely
+- `cli` steps run shell commands via `sh -c` — treat `.runeflow.md` files as executable code
 - `--runtime ./path.js` loads that module via Node `import()` — only load trusted runtimes
-- `mcp_servers` and `composio` frontmatter blocks support `${VAR}` env var interpolation. By default, only a curated allowlist of known integration keys (provider API keys, Composio IDs, etc.) can be expanded. Unrecognized variables resolve to an empty string with a warning on stderr. Extend the allowlist or disable it:
+- `mcp_servers` and `composio` frontmatter support `${VAR}` env var interpolation. Only a curated allowlist of known integration keys can be expanded by default. Extend or disable it:
 
 ```bash
-# Add extra allowed variables (comma-separated)
+# Add extra allowed variables
 export RUNEFLOW_ENV_ALLOWLIST=MY_CUSTOM_TOKEN,DEPLOY_KEY
 
-# Disable the allowlist entirely (trust the .runeflow.md file fully)
+# Disable the allowlist entirely
 export RUNEFLOW_ENV_ALLOWLIST=*
 ```
 
 ---
 
-## 🗺️ Roadmap
+## Contributing
 
-| Phase | Status | What |
-|---|---|---|
-| v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
-| v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps, MCP client plugins (stdio + HTTP), Composio client plugin, env var allowlist |
-| v0.3 | ✅ shipped | `runeflow-mcp` (MCP server), `runeflow-registry` (GitHub, Linear, Slack, Notion), `dryrun`, `mcp_servers` frontmatter, `composio` frontmatter |
-| v0.4 | ✅ shipped | smarter `runeflow init` (repo inspection, heuristics, conversion), local LLM fallback, **TypeScript definitions**, **Streaming CLI output** |
-| v0.5 | 📅 in progress | `runeflow test` (behavioral test harness), `runeflow build` (LLM → `.runeflow.md` compiler), cross-file composition / imports |
-| v0.6 | 📅 planned | Remote execution (server mode), Web Dashboard for run artifact inspection |
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, workflow, and what's in scope.
 
 ---
 
-## 🔗 Integration Modes
-
-Runeflow supports three ways to integrate. Pick the one that fits your setup.
-
-### Mode 1 — Top-Level Executor ✅
-
-Runeflow runs the full skill end-to-end. Your code calls `runRuneflow`, the runtime owns every step — tool calls, LLM calls, branching, retries, artifacts. You get structured JSON outputs and a full run trace.
-
-```js
-import { parseRuneflow, runRuneflow, createDefaultRuntime } from "runeflow";
-import fs from "node:fs/promises";
-
-const source = await fs.readFile("./draft-pr.runeflow.md", "utf8");
-const definition = parseRuneflow(source);
-const runtime = createDefaultRuntime();
-
-const run = await runRuneflow(definition, { base_branch: "main" }, runtime);
-console.log(run.outputs); // { title: "...", body: "..." }
-```
-
-Or via CLI:
-
-```bash
-runeflow run ./draft-pr.runeflow.md --input '{"base_branch":"main"}' --runtime ./runtime.js
-```
-
-Best for: standalone automation scripts, CI/CD pipelines, backend services, scheduled jobs.
-
----
-
-### Mode 2 — Assemble (Preprocessor for Agents) ✅
-
-You run `runeflow assemble` before invoking an agent. Runeflow executes all the deterministic setup steps (git, file reads, API calls), resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file instead of the raw `.runeflow.md` — it sees only what it needs for one step.
-
-```bash
-runeflow assemble ./draft-pr.runeflow.md \
-  --step draft \
-  --input '{"base_branch":"main"}' \
-  --output context.md
-```
-
-The output contains the resolved prompt, operator docs, resolved input, and output schema. No `runeflow` block, no tool wiring, no DSL. The agent makes one focused LLM call.
-
-```md
-# draft-pr — assembled context for `draft`
-
-## Guidance
-Write a concise PR title and body...
-
-## Your task
-Draft a PR for feat/my-feature → main.
-Changed files: ["src/runtime.js", "src/cli.js"]
-Diff: src/runtime.js | 45 +++...
-
-## Output schema
-{ "title": "string", "body": "string" }
-```
-
-This is how the -82% token reduction works in practice — the agent never sees orchestration instructions.
-
-Best for: Claude Code, Codex, Cursor, or any agent that reads files as context. Works today with zero agent integration required.
-
----
-
-### Mode 3 — MCP Server ✅
-
-`runeflow-mcp` exposes `runeflow_run` and `runeflow_validate` as MCP tools. Any MCP-compatible agent (Claude Code, Cursor, Codex) calls them directly — no preprocessing step, no file handoff.
-
-```bash
-npm install -g runeflow-mcp
-```
-
-Add to your MCP config (`.mcp.json` in your project root for Claude Code):
-
-```json
-{
-  "mcpServers": {
-    "runeflow": {
-      "command": "npx",
-      "args": ["runeflow-mcp"],
-      "env": {
-        "CEREBRAS_API_KEY": "${CEREBRAS_API_KEY}"
-      }
-    }
-  }
-}
-```
-
-Then in Claude Code or Cursor:
-> "Use runeflow_run to run ./draft-pr.runeflow.md with inputs `{"base_branch": "main"}`"
-
-The agent never sees the `.runeflow.md` internals. It just gets back `{ status, run_id, outputs }`.
-
-Best for: Claude Code with MCP configured, Cursor agents, any system that supports the Model Context Protocol.
-
----
-
-| Mode | Status | Agent integration needed | Best for |
-|---|---|---|---|
-| Top-level executor | ✅ now | None — you call it directly | Scripts, CI/CD, backends |
-| Assemble | ✅ now | None — agent loads a file | Claude Code, Codex, Cursor |
-| MCP server | ✅ now | MCP client support | Any MCP-compatible agent |
-
----
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, workflow, and what's in scope. Contributors clone the repo directly.
-
----
-
-## 📄 License
+## License
 
 MIT

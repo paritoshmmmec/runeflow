@@ -817,3 +817,86 @@ output {
   assert.ok(validation.issues.some((i) => i.includes("Imported file not found")));
   assert.ok(validation.issues.some((i) => i.includes("Unknown block 'hello_template'")));
 });
+
+test("validateRuneflow accepts parallel llm and cli children", () => {
+  const parsed = parseRuneflow(`---
+name: parallel-mixed
+description: Parallel with llm and cli children
+version: 0.1
+inputs: {}
+outputs:
+  ok: boolean
+llm:
+  provider: mock
+  router: false
+  model: base
+---
+
+\`\`\`runeflow
+parallel checks {
+  steps: [draft, run_cmd]
+}
+
+step draft type=llm {
+  prompt: "Write something."
+  schema: { title: string }
+}
+
+step run_cmd type=cli {
+  command: "echo hello"
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { ok: true }
+  out: { ok: boolean }
+}
+
+output {
+  ok: steps.finish.ok
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("validateRuneflow rejects disallowed parallel child kinds", () => {
+  const parsed = parseRuneflow(`---
+name: parallel-bad-kind
+description: Parallel with disallowed child kind
+version: 0.1
+inputs: {}
+outputs:
+  ok: boolean
+---
+
+\`\`\`runeflow
+parallel checks {
+  steps: [transform_step]
+}
+
+step transform_step type=transform {
+  input: "hello"
+  expr: "input.toUpperCase()"
+  out: string
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { ok: true }
+  out: { ok: boolean }
+}
+
+output {
+  ok: steps.finish.ok
+}
+\`\`\`
+`);
+
+  const result = validateRuneflow(parsed);
+  assert.equal(result.valid, false);
+  assert.match(result.issues.join("\n"), /must be a tool, llm, or cli step/);
+});
