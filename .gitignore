@@ -5,3 +5,7 @@ node_modules/
 .vscode/
 result_*.json
 .tmp-composio/
+.kiro/specs/smarter-init/.config.kiro
+.kiro/specs/smarter-init/design.md
+.kiro/specs/smarter-init/requirements.md
+.kiro/specs/smarter-init/tasks.md

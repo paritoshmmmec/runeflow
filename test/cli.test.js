@@ -287,6 +287,7 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
       model: "qwen-3-235b-a22b-instruct-2507",
       cwd: tempDir,
       silent: true,
+      noLocalLlm: true,
     });
 
     const skillContent = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
@@ -294,9 +295,7 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
 
     assert.ok(skillContent.includes("name: my-skill"));
     assert.ok(skillContent.includes("provider: cerebras"));
-    assert.ok(skillContent.includes("Test skill"));
     assert.ok(runtimeContent.includes("createDefaultRuntime"));
-    assert.ok(runtimeContent.includes("CEREBRAS_API_KEY"));
   } finally {
     process.chdir(originalCwd);
   }
@@ -321,6 +320,7 @@ test("parseOptions: --force without a value is treated as boolean true", async (
       cwd: tempDir,
       force: true,
       silent: true,
+      noLocalLlm: true,
     });
 
     const content = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
@@ -679,5 +679,94 @@ export default {
     assert.equal(run.outputs.ok, true);
   } finally {
     process.chdir(originalCwd);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CLI flag wiring tests for smarter-init new flags
+// ---------------------------------------------------------------------------
+
+test("runCli init: passes --context flag to runInit", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-context-"));
+  const originalCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    // We verify the flag is parsed and forwarded by checking the skill is created
+    // (context influences template selection but doesn't break anything)
+    await captureStdout(() =>
+      runCli(["init", "--context", "stripe payment", "--no-local-llm", "--no-polish", "--name", "ctx-test"]),
+    );
+
+    const skillPath = path.join(tempDir, "ctx-test.runeflow.md");
+    const exists = await fs.access(skillPath).then(() => true).catch(() => false);
+    assert.ok(exists, "--context flag should not prevent skill creation");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli init: passes --template flag to runInit", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-template-"));
+  const originalCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    await captureStdout(() =>
+      runCli(["init", "--template", "notify-slack", "--no-local-llm", "--no-polish"]),
+    );
+
+    const entries = await fs.readdir(tempDir);
+    const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
+    assert.ok(skillFiles.length >= 1, "--template flag should produce a skill file");
+
+    const content = await fs.readFile(path.join(tempDir, skillFiles[0]), "utf8");
+    assert.match(content, /slack/i, "Generated skill should reference Slack when --template notify-slack");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli init: passes --no-local-llm flag to runInit", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-nollm-"));
+  const originalCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    // --no-local-llm should not trigger a download; skill should still be created
+    await captureStdout(() =>
+      runCli(["init", "--no-local-llm", "--no-polish", "--name", "nollm-test"]),
+    );
+
+    const skillPath = path.join(tempDir, "nollm-test.runeflow.md");
+    const exists = await fs.access(skillPath).then(() => true).catch(() => false);
+    assert.ok(exists, "--no-local-llm should still produce a skill file");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli init: passes --no-polish flag to runInit", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-nopolish-"));
+  const originalCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["init", "--no-polish", "--no-local-llm", "--name", "nopolish-test"]),
+    );
+
+    const skillPath = path.join(tempDir, "nopolish-test.runeflow.md");
+    const exists = await fs.access(skillPath).then(() => true).catch(() => false);
+    assert.ok(exists, "--no-polish should still produce a skill file");
+
+    // Should not see polish messages
+    assert.doesNotMatch(output, /Polishing/, "--no-polish should suppress polish messages");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
   }
 });

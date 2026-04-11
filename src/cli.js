@@ -196,7 +196,9 @@ export async function runCli(argv) {
 
   if (!command || command === "help" || command === "--help") {
     console.log(`Usage:
-  runeflow init [--name <name>] [--provider <provider>]
+  runeflow init [--name <name>] [--context <hint>] [--template <id>]
+               [--provider <provider>] [--model <model>]
+               [--no-local-llm] [--no-polish] [--force]
   runeflow validate <file> [--runtime ./runtime.js]
   runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
@@ -217,6 +219,10 @@ export async function runCli(argv) {
       provider: options.provider,
       model: options.model,
       force: Boolean(options.force),
+      context: options.context,
+      template: options.template,
+      noLocalLlm: Boolean(options["no-local-llm"]),
+      noPolish: Boolean(options["no-polish"]),
     });
     return;
   }

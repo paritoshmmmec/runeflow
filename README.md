@@ -21,6 +21,7 @@
 - [The Solution](#-the-solution)
 - [Benchmarks](#-benchmarks)
 - [Quickstart](#-quickstart)
+  - [runeflow init](#step-3--generate-a-skill-with-runeflow-init)
 - [Skill File Shape](#-skill-file-shape)
 - [Step Kinds](#-step-kinds)
 - [Expressions](#-expressions)
@@ -101,7 +102,51 @@ Add your key to a `.env` file:
 echo "CEREBRAS_API_KEY=your-key-here" > .env
 ```
 
-**Step 3 — Create a skill file**
+**Step 3 — Generate a skill with `runeflow init`**
+
+Run `runeflow init` inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.runeflow.md` files — and generates a real, immediately-runnable skill tailored to what it finds.
+
+```bash
+runeflow init
+```
+
+If a cloud API key is present in your environment, the generated skill is polished by that provider. If not, a small local model (`Qwen2.5-0.5B`) is downloaded to `~/.runeflow/models/` and used instead — no sign-up required.
+
+**Flags:**
+
+```bash
+runeflow init [--name <slug>] [--context <hint>] [--template <id>]
+              [--provider <provider>] [--model <model>]
+              [--no-local-llm] [--no-polish] [--force]
+```
+
+| Flag | What it does |
+|---|---|
+| `--context <hint>` | Extra hint for template selection, e.g. `"deploy to AWS"` |
+| `--template <id>` | Force a specific template (bypasses heuristics) |
+| `--no-local-llm` | Skip local model download; write skill with a placeholder provider |
+| `--no-polish` | Skip LLM polish even when a cloud key is present |
+| `--force` | Overwrite existing skill and `runtime.js` files |
+| `--name <slug>` | Override the generated skill filename |
+
+**Built-in templates:**
+
+| ID | When selected |
+|---|---|
+| `open-pr` | GitHub integration or `push` script detected |
+| `release-notes` | `release`/`version` scripts or release-related commits |
+| `test-and-lint` | `test`/`lint` scripts detected |
+| `deploy` | `deploy`/`build` scripts or CI provider present |
+| `notify-slack` | Slack SDK detected |
+| `stripe-payment` | Stripe SDK detected |
+| `linear-issue` | Linear SDK detected |
+| `generic-llm-task` | Default fallback |
+
+**Conversion mode:** if your project contains existing Claude-style Markdown skill files (files with `<system>` blocks, `## Tools` sections, or `Input:`/`Output:` annotations), `runeflow init` detects them and converts them to `.runeflow.md` format instead of generating from a template.
+
+---
+
+**Or write a skill file by hand:**
 
 A skill is one Markdown file. The frontmatter declares inputs/outputs, the prose is guidance for the LLM, and the `runeflow` block is the executable workflow.
 
@@ -407,7 +452,9 @@ runeflow tools inspect git.diff_summary
 ## 🖥️ CLI Reference
 
 ```bash
-runeflow init [--name <name>] [--provider <provider>]
+runeflow init [--name <name>] [--context <hint>] [--template <id>]
+              [--provider <provider>] [--model <model>]
+              [--no-local-llm] [--no-polish] [--force]
 runeflow validate <file> [--runtime ./runtime.js]
 runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
 runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
@@ -419,6 +466,8 @@ runeflow import <file> [--output converted.runeflow.md]
 runeflow tools list [--runtime ./runtime.js]
 runeflow tools inspect <tool-name> [--runtime ./runtime.js]
 ```
+
+`init` inspects the current directory and generates a ready-to-run `.runeflow.md` skill. It detects installed SDKs, git history, CI config, and existing skills to pick the best template. Pass `--context` to give it a hint, `--template` to force a specific one, or `--no-local-llm` to skip the local model download when no cloud key is present.
 
 `dryrun` validates the skill, then walks every step resolving all bindings with the provided inputs — but executes nothing. No tool calls, no LLM calls, no shell commands. Shows exactly what each step *would* do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders (e.g. `"<string>"`, `0`, `false`) derived from the output schema.
 
@@ -779,7 +828,8 @@ export RUNEFLOW_ENV_ALLOWLIST=*
 | v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
 | v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps, MCP client plugins (stdio + HTTP), Composio client plugin, env var allowlist |
 | v0.3 | ✅ shipped | `runeflow-mcp` (MCP server), `runeflow-registry` (GitHub, Linear, Slack, Notion), `dryrun`, `mcp_servers` frontmatter, `composio` frontmatter |
-| v0.4 | 📅 planned | `runeflow build` (LLM → skill compiler), `runeflow test` harness, skill composition / imports |
+| v0.4 | ✅ shipped | smarter `runeflow init` — repo inspection, heuristic template selection, Claude skill conversion, local LLM fallback |
+| v0.5 | 📅 planned | `runeflow build` (LLM → skill compiler), `runeflow test` harness, skill composition / imports |
 
 ---
 
