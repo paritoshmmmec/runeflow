@@ -107,7 +107,7 @@ async function buildFrontmatterPlugins(definition, options = {}) {
       plugins.push(await createComposioClientPlugin({
         tools: cfg.tools,
         toolkits: cfg.toolkits,
-        executeDefaults: {
+        executeDefaults: cfg.executeDefaults ?? {
           userId: cfg.entity_id ?? cfg.user_id,
           connectedAccountId: cfg.connected_account_id,
         },

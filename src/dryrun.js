@@ -104,18 +104,14 @@ export async function dryrunRuneflow(definition, inputs = {}, runtime = {}, opti
     toolRegistry: options.toolRegistry,
   });
 
-  let validation;
   try {
-    validation = validateSkill(definition, { toolRegistry });
-  } finally {
-    await closeRuntimePlugins(environment).catch(() => {});
-  }
+    const validation = validateSkill(definition, { toolRegistry });
 
-  if (!validation.valid) {
-    return { valid: false, validation, steps: [], output: null };
-  }
+    if (!validation.valid) {
+      return { valid: false, validation, steps: [], output: null };
+    }
 
-  const resolvedWorkflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} });
+    const resolvedWorkflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} });
   const steps = resolvedWorkflow.steps;
   const stepIndex = new Map(steps.map((s, idx) => [s.id, idx]));
   const completedSteps = [];
@@ -288,6 +284,9 @@ export async function dryrunRuneflow(definition, inputs = {}, runtime = {}, opti
     output: resolvedOutput?.value ?? null,
     output_resolve_error: resolvedOutput?.error ?? null,
   };
+  } finally {
+    await closeRuntimePlugins(environment).catch(() => {});
+  }
 }
 
 export const dryrunSkill = dryrunRuneflow;

@@ -258,7 +258,7 @@ export async function runCli(argv) {
     const runtime = await loadRuntime(options.runtime);
     const inputArg = options.input ?? "{}";
     const inputs = JSON.parse(inputArg);
-    const plan = dryrunRuneflow(definition, inputs, runtime);
+    const plan = await dryrunRuneflow(definition, inputs, runtime);
     console.log(JSON.stringify(plan, null, 2));
     if (!plan.valid) {
       process.exitCode = 1;
