@@ -481,6 +481,8 @@ export type MockValue<TInput = Record<string, unknown>, TOutput = Record<string,
 /**
  * Fixture object for `runeflow test`.
  *
+ * Omitted top-level sections are treated as empty objects by `loadFixture`.
+ *
  * - `inputs`: skill input values
  * - `mocks.tools`: keyed by tool name, return value or factory function
  * - `mocks.llm`: keyed by step ID, return value or factory function
@@ -515,6 +517,8 @@ export interface TestResult {
   failures: TestFailure[];
   /** The underlying `RunResult` (null if the skill threw before completing). */
   run: RunResult | null;
+  /** Log of tool calls made during the run, keyed by step ID. */
+  toolCallsByStep: Record<string, Record<string, unknown>[]>;
   /** Log of tool calls made during the run, keyed by tool name. */
   toolCalls: Record<string, Record<string, unknown>[]>;
   /** Log of LLM calls made during the run, keyed by step ID. */
@@ -540,4 +544,3 @@ export function runTest(
  * Loads a fixture JSON file from the given path.
  */
 export function loadFixture(fixturePath: string): Promise<RuneflowFixture>;
-

@@ -375,8 +375,31 @@ export async function runCli(argv) {
       for (let i = 0; i < result.failures.length; i++) {
         const f = result.failures[i];
         console.error(`  ${i + 1}) ${f.path}`);
-        console.error(`       expected: ${JSON.stringify(f.expected)}`);
-        console.error(`       actual:   ${JSON.stringify(f.actual)}`);
+        const expectedStr = JSON.stringify(f.expected, null, 2);
+        const actualStr = JSON.stringify(f.actual, null, 2);
+        const expectedLines = expectedStr.split("\n");
+        const actualLines = actualStr.split("\n");
+        if (expectedLines.length <= 1 && actualLines.length <= 1) {
+          // Scalar: compact patch-style diff with labels
+          console.error(`       expected: ${expectedStr}`);
+          console.error(`       actual:   ${actualStr}`);
+          console.error(`     - ${expectedStr}`);
+          console.error(`     + ${actualStr}`);
+        } else {
+          // Multi-line: show labelled blocks then removed/added lines
+          console.error(`       expected: ${expectedLines[0]}${expectedLines.length > 1 ? " ..." : ""}`);
+          console.error(`       actual:   ${actualLines[0]}${actualLines.length > 1 ? " ..." : ""}`);
+          for (const line of expectedLines) {
+            if (!actualLines.includes(line)) {
+              console.error(`     - ${line}`);
+            }
+          }
+          for (const line of actualLines) {
+            if (!expectedLines.includes(line)) {
+              console.error(`     + ${line}`);
+            }
+          }
+        }
       }
       process.exitCode = 1;
     }
@@ -428,7 +451,12 @@ export async function runCli(argv) {
 
     // --step <id>: show a single step artifact
     if (options.step) {
-      const stepArtifactPath = path.join(runsDir, runId, "steps", `${options.step}.json`);
+      // Determine which runs dir actually holds this run (primary or legacy fallback)
+      const resolvedRunsDir =
+        fallbackRunsDir && !(await fs.access(path.join(runsDir, runId, "steps")).then(() => true).catch(() => false))
+          ? fallbackRunsDir
+          : runsDir;
+      const stepArtifactPath = path.join(resolvedRunsDir, runId, "steps", `${options.step}.json`);
       let stepRaw;
       try {
         stepRaw = await fs.readFile(stepArtifactPath, "utf8");

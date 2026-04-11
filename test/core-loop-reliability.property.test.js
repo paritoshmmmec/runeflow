@@ -703,10 +703,10 @@ output {
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 
-// ─── Property 13: Fixture loading emits descriptive error for missing required fields ─
+// ─── Property 13: Fixture loading normalizes missing top-level fields ─
 // Feature: core-loop-reliability, Property 13
 
-test("Property 13: fixture loading emits descriptive error for missing required fields", async () => {
+test("Property 13: fixture loading normalizes missing top-level fields", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-prop13-"));
 
   await fc.assert(
@@ -724,16 +724,12 @@ test("Property 13: fixture loading emits descriptive error for missing required 
         const fixturePath = path.join(tempDir, `fixture-missing-${missingField}.json`);
         await fs.writeFile(fixturePath, JSON.stringify(incomplete));
 
-        await assert.rejects(
-          () => loadFixture(fixturePath),
-          (err) => {
-            assert.ok(
-              err.message.includes(missingField),
-              `Expected error to mention missing field '${missingField}'. Got: ${err.message}`,
-            );
-            return true;
-          },
-        );
+        const fixture = await loadFixture(fixturePath);
+        assert.deepEqual(fixture, {
+          inputs: incomplete.inputs ?? {},
+          mocks: incomplete.mocks ?? {},
+          expect: incomplete.expect ?? {},
+        });
       },
     ),
     { numRuns: 30 },

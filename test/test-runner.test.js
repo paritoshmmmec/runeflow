@@ -409,52 +409,34 @@ output { title: steps.draft.title }
 
 import { loadFixture } from "../src/test-runner.js";
 
-test("loadFixture throws descriptive error when 'inputs' field is missing", async () => {
+test("loadFixture defaults missing 'inputs' field to an empty object", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-"));
   const fixturePath = path.join(tempDir, "fixture.json");
   await fs.writeFile(fixturePath, JSON.stringify({ mocks: {}, expect: {} }));
 
-  await assert.rejects(
-    () => loadFixture(fixturePath),
-    (err) => {
-      assert.match(err.message, /inputs/);
-      assert.match(err.message, /missing required field/);
-      return true;
-    },
-  );
+  const fixture = await loadFixture(fixturePath);
+  assert.deepEqual(fixture, { inputs: {}, mocks: {}, expect: {} });
 });
 
-test("loadFixture throws descriptive error when 'mocks' field is missing", async () => {
+test("loadFixture defaults missing 'mocks' field to an empty object", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-"));
   const fixturePath = path.join(tempDir, "fixture.json");
   await fs.writeFile(fixturePath, JSON.stringify({ inputs: {}, expect: {} }));
 
-  await assert.rejects(
-    () => loadFixture(fixturePath),
-    (err) => {
-      assert.match(err.message, /mocks/);
-      assert.match(err.message, /missing required field/);
-      return true;
-    },
-  );
+  const fixture = await loadFixture(fixturePath);
+  assert.deepEqual(fixture, { inputs: {}, mocks: {}, expect: {} });
 });
 
-test("loadFixture throws descriptive error when 'expect' field is missing", async () => {
+test("loadFixture defaults missing 'expect' field to an empty object", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-"));
   const fixturePath = path.join(tempDir, "fixture.json");
   await fs.writeFile(fixturePath, JSON.stringify({ inputs: {}, mocks: {} }));
 
-  await assert.rejects(
-    () => loadFixture(fixturePath),
-    (err) => {
-      assert.match(err.message, /expect/);
-      assert.match(err.message, /missing required field/);
-      return true;
-    },
-  );
+  const fixture = await loadFixture(fixturePath);
+  assert.deepEqual(fixture, { inputs: {}, mocks: {}, expect: {} });
 });
 
-test("loadFixture returns parsed fixture when all required fields are present", async () => {
+test("loadFixture preserves provided fixture fields when all top-level fields are present", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-ok-"));
   const fixturePath = path.join(tempDir, "fixture.json");
   const data = { inputs: { x: 1 }, mocks: { tools: {}, llm: {} }, expect: { status: "success" } };

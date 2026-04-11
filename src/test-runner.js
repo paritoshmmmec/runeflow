@@ -314,10 +314,9 @@ export async function loadFixture(fixturePath) {
   const absolutePath = path.resolve(process.cwd(), fixturePath);
   const raw = await fs.readFile(absolutePath, "utf8");
   const fixture = JSON.parse(raw);
-  for (const field of ["inputs", "mocks", "expect"]) {
-    if (!Object.prototype.hasOwnProperty.call(fixture, field)) {
-      throw new Error(`Fixture at '${fixturePath}' is missing required field: '${field}'`);
-    }
-  }
-  return fixture;
+  return {
+    inputs: fixture.inputs ?? {},
+    mocks: fixture.mocks ?? {},
+    expect: fixture.expect ?? {},
+  };
 }
