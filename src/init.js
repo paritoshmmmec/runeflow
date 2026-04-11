@@ -66,8 +66,9 @@ async function fileExists(filePath) {
 function resolveProvider(options) {
   // 1. Explicit flag takes priority
   if (options.provider) {
-    const model = options.model ?? CLOUD_PROVIDERS.find((p) => p.provider === options.provider)?.model ?? "unknown";
-    return { provider: options.provider, model, isCloud: true };
+    const knownProvider = CLOUD_PROVIDERS.find((p) => p.provider === options.provider);
+    const model = options.model ?? knownProvider?.model ?? "unknown";
+    return { provider: options.provider, model, isCloud: !!knownProvider };
   }
 
   // 2. Check env keys in priority order
@@ -126,6 +127,7 @@ async function downloadModel(log) {
     function doRequest(url, redirectCount = 0) {
       if (redirectCount > 5) {
         file.destroy();
+        fsSync.unlink(LOCAL_MODEL_PATH, () => {});
         reject(new Error("Too many redirects downloading model"));
         return;
       }
@@ -140,6 +142,7 @@ async function downloadModel(log) {
         if (res.statusCode !== 200) {
           res.resume();
           file.destroy();
+          fsSync.unlink(LOCAL_MODEL_PATH, () => {});
           reject(new Error(`Model download failed: HTTP ${res.statusCode}`));
           return;
         }
@@ -166,6 +169,7 @@ async function downloadModel(log) {
         });
       }).on("error", (err) => {
         file.destroy();
+        fsSync.unlink(LOCAL_MODEL_PATH, () => {});
         reject(err);
       });
     }
