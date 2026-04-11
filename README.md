@@ -15,6 +15,31 @@
 
 ---
 
+## Contents
+
+- [The Problem](#-the-problem)
+- [The Solution](#-the-solution)
+- [Benchmarks](#-benchmarks)
+- [Quickstart](#-quickstart)
+- [Skill File Shape](#-skill-file-shape)
+- [Step Kinds](#-step-kinds)
+- [Expressions](#-expressions)
+- [Built-in Tools](#-built-in-tools)
+- [CLI Reference](#️-cli-reference)
+- [Writing a Runtime](#️-writing-a-runtime)
+- [Examples](#-examples)
+- [Zero-Config MCP & Composio Wiring](#-zero-config-mcp--composio-wiring)
+- [runeflow-registry](#-runeflow-registry)
+- [Extending the Tool Registry](#-extending-the-tool-registry)
+- [Caching](#-caching)
+- [Trust Model](#-trust-model)
+- [Roadmap](#️-roadmap)
+- [Integration Modes](#-integration-modes)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
 ## 🤔 The Problem
 
 Most AI skills are just prompt text. The model informally decides what to do, which tools to call, and in what order. That breaks down fast:
@@ -397,6 +422,21 @@ runeflow tools inspect <tool-name> [--runtime ./runtime.js]
 
 `dryrun` validates the skill, then walks every step resolving all bindings with the provided inputs — but executes nothing. No tool calls, no LLM calls, no shell commands. Shows exactly what each step *would* do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders (e.g. `"<string>"`, `0`, `false`) derived from the output schema.
 
+```bash
+runeflow dryrun ./draft-pr.runeflow.md --input '{"base_branch":"main"}'
+```
+
+```json
+{
+  "valid": true,
+  "steps": [
+    { "id": "current_branch", "type": "tool", "tool": "git.current_branch", "with": {} },
+    { "id": "summarize_diff", "type": "tool", "tool": "git.diff_summary", "with": { "base": "main" } },
+    { "id": "draft_pr", "type": "llm", "prompt": "Draft a PR for <string> targeting main..." }
+  ]
+}
+```
+
 `resume` reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
 
 `watch` runs a skill on a cron schedule, on file changes, or both. It reuses the normal `run` path, so artifacts, prompts, validation, and runtime loading behave the same way.
@@ -549,7 +589,103 @@ The default Composio client plugin expects `COMPOSIO_API_KEY` and `@composio/cor
 
 ---
 
-## 🔌 Extending the Tool Registry
+## 🔌 Zero-Config MCP & Composio Wiring
+
+There are two ways to wire external tools into a skill:
+
+1. **Frontmatter blocks** — declare `mcp_servers` or `composio` directly in the skill file. No separate runtime file needed. Good for self-contained skills.
+2. **Runtime plugins** — use `createMcpClientPlugin` / `createComposioClientPlugin` in a `runtime.js` file. Good for sharing tool config across multiple skills. See [Writing a Runtime](#️-writing-a-runtime).
+
+### `mcp_servers` (frontmatter option)
+
+````md
+---
+name: my-skill
+mcp_servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+  my-api:
+    url: https://my-api.example.com/mcp
+    headers:
+      Authorization: "Bearer ${MY_API_TOKEN}"
+---
+
+```runeflow
+step read type=tool {
+  tool: mcp.filesystem.read_file
+  with: { path: "README.md" }
+  out: { content: string }
+}
+```
+````
+
+Tools from each server are available as `mcp.<server-name>.<tool-name>` in your steps. Runeflow connects, discovers tools via `tools/list`, and cleans up after the run automatically.
+
+### `composio` (frontmatter option)
+
+````md
+---
+name: my-skill
+composio:
+  toolkits: [github, linear]
+  executeDefaults:
+    userId: ${COMPOSIO_USER_ID}
+    connectedAccountId: ${COMPOSIO_CONNECTED_ACCOUNT_ID}
+---
+
+```runeflow
+step create_issue type=tool {
+  tool: composio.linear.create_issue
+  with: { title: steps.draft.title }
+  out: { content: [any], isError: boolean, raw: any }
+}
+```
+````
+
+Requires `COMPOSIO_API_KEY` and `npm install @composio/core`. Tools are available as `composio.<toolkit>.<tool>`.
+
+---
+
+## 📦 runeflow-registry
+
+Official tool registry with schemas + implementations for common providers.
+
+```bash
+npm install runeflow-registry
+
+# install the provider packages you need
+npm install @octokit/rest       # github
+npm install @linear/sdk         # linear
+npm install @slack/web-api      # slack
+npm install @notionhq/client    # notion
+```
+
+```js
+// runtime.js
+import { createDefaultRuntime } from "runeflow";
+import { github, linear, slack } from "runeflow-registry";
+
+export default {
+  ...createDefaultRuntime(),
+  tools: {
+    ...github({ token: process.env.GITHUB_TOKEN }),
+    ...linear({ apiKey: process.env.LINEAR_API_KEY }),
+    ...slack({ token: process.env.SLACK_BOT_TOKEN }),
+  },
+};
+```
+
+| Provider | Package | Tools |
+|---|---|---|
+| `github` | `@octokit/rest` | `github.get_pr`, `github.create_pr`, `github.merge_pr`, `github.add_label`, `github.create_issue` |
+| `linear` | `@linear/sdk` | `linear.create_issue`, `linear.update_issue` |
+| `slack` | `@slack/web-api` | `slack.post_message`, `slack.get_channel_history` |
+| `notion` | `@notionhq/client` | `notion.create_page`, `notion.query_database` |
+
+---
+
+
 
 The built-in registry ships with the package. You can add your own tool schemas two ways:
 
@@ -642,7 +778,8 @@ export RUNEFLOW_ENV_ALLOWLIST=*
 |---|---|---|
 | v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
 | v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps, MCP client plugins (stdio + HTTP), Composio client plugin, env var allowlist |
-| v0.3 | 📅 planned | MCP server (expose `runeflow_run` as an MCP tool), `runeflow build` (LLM → skill compiler), agent integration |
+| v0.3 | ✅ shipped | `runeflow-mcp` (MCP server), `runeflow-registry` (GitHub, Linear, Slack, Notion), `dryrun`, `mcp_servers` frontmatter, `composio` frontmatter |
+| v0.4 | 📅 planned | `runeflow build` (LLM → skill compiler), `runeflow test` harness, skill composition / imports |
 
 ---
 
@@ -710,21 +847,34 @@ Best for: Claude Code, Codex, Cursor, or any agent that reads files as context. 
 
 ---
 
-### Mode 3 — MCP Server 🔜 v0.3
+### Mode 3 — MCP Server ✅
 
-`runeflow-mcp` exposes `runeflow_run` as an MCP tool. Any MCP-compatible agent calls it directly — no preprocessing step, no file handoff. The agent passes the skill path and inputs, Runeflow executes the full workflow, returns structured outputs.
+`runeflow-mcp` exposes `runeflow_run` and `runeflow_validate` as MCP tools. Any MCP-compatible agent (Claude Code, Cursor, Codex) calls them directly — no preprocessing step, no file handoff.
+
+```bash
+npm install -g runeflow-mcp
+```
+
+Add to your MCP config (`.mcp.json` in your project root for Claude Code):
 
 ```json
 {
-  "tool": "runeflow_run",
-  "arguments": {
-    "skill": "./draft-pr.runeflow.md",
-    "inputs": { "base_branch": "main" }
+  "mcpServers": {
+    "runeflow": {
+      "command": "npx",
+      "args": ["runeflow-mcp"],
+      "env": {
+        "CEREBRAS_API_KEY": "${CEREBRAS_API_KEY}"
+      }
+    }
   }
 }
 ```
 
-The agent never sees the skill internals. It just gets back `{ title, body }`.
+Then in Claude Code or Cursor:
+> "Use runeflow_run to run ./draft-pr.runeflow.md with inputs `{"base_branch": "main"}`"
+
+The agent never sees the skill internals. It just gets back `{ status, run_id, outputs }`.
 
 Best for: Claude Code with MCP configured, Cursor agents, any system that supports the Model Context Protocol.
 
@@ -734,7 +884,7 @@ Best for: Claude Code with MCP configured, Cursor agents, any system that suppor
 |---|---|---|---|
 | Top-level executor | ✅ now | None — you call it directly | Scripts, CI/CD, backends |
 | Assemble | ✅ now | None — agent loads a file | Claude Code, Codex, Cursor |
-| MCP server | 🔜 v0.3 | MCP client support | Any MCP-compatible agent |
+| MCP server | ✅ now | MCP client support | Any MCP-compatible agent |
 
 ---
 
