@@ -3,14 +3,17 @@ name: Publish to npm
 on:
   push:
     tags:
-      - "v*"          # triggers on v0.1.0, v0.2.0, v1.0.0-alpha.1, etc.
+      - "v*"           # runeflow root:    v0.2.0
+      - "mcp-v*"       # runeflow-mcp:     mcp-v0.3.0
+      - "registry-v*"  # runeflow-registry: registry-v0.1.0
 
 jobs:
-  publish:
+  publish-runeflow:
+    if: startsWith(github.ref_name, 'v') && !startsWith(github.ref_name, 'mcp-v') && !startsWith(github.ref_name, 'registry-v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # needed for npm provenance
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +29,58 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Publish
+      - name: Validate examples
+        run: |
+          node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md
+          node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md
+          node ./bin/runeflow.js validate ./examples/release-notes.runeflow.md
+
+      - name: Publish runeflow
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-runeflow-mcp:
+    if: startsWith(github.ref_name, 'mcp-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install root dependencies (for runeflow peer)
+        run: npm ci
+
+      - name: Publish runeflow-mcp
+        run: npm publish --provenance --access public
+        working-directory: packages/runeflow-mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-runeflow-registry:
+    if: startsWith(github.ref_name, 'registry-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish runeflow-registry
+        run: npm publish --provenance --access public
+        working-directory: packages/runeflow-registry
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

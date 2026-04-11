@@ -5,6 +5,7 @@
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=20" },
+  "files": ["index.js", "providers/", "README.md"],
   "main": "./index.js",
   "exports": {
     ".": "./index.js",
