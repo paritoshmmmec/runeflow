@@ -1,6 +1,4 @@
-function slugify(str) {
-  return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
+import { slugify } from "../init-utils.js";
 
 export const template = {
   id: "linear-issue",

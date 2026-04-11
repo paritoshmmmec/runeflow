@@ -1,14 +1,7 @@
 import YAML from "yaml";
 import path from "node:path";
 import { parseSkill } from "./parser.js";
-
-function slugifyName(value) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+import { slugify as slugifyName } from "./init-utils.js";
 
 export function importMarkdownSkill(source, options = {}) {
   const parsed = parseSkill(source, options);

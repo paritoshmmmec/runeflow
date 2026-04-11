@@ -167,9 +167,8 @@ test("throws when skill file exists and --force is not set", async () => {
 test("--no-polish skips polish (no polish message in output)", async () => {
   const dir = await makeTmpDir();
   const messages = [];
+  const origLog = console.log;
   try {
-    // Temporarily override console.log to capture messages
-    const origLog = console.log;
     console.log = (...args) => messages.push(args.join(" "));
 
     await runInit({
@@ -180,12 +179,10 @@ test("--no-polish skips polish (no polish message in output)", async () => {
       noPolish: true,
     });
 
-    console.log = origLog;
-
     const polishMessages = messages.filter((m) => m.includes("Polishing"));
     assert.equal(polishMessages.length, 0, "Should not see polish messages with --no-polish");
   } finally {
-    console.log = console.log; // restore just in case
+    console.log = origLog;
     await fs.rm(dir, { recursive: true, force: true });
   }
 });

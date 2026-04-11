@@ -25,6 +25,7 @@ import { selectTemplate, reselectWithAnswer } from "./init-heuristics.js";
 import { getTemplate } from "./init-templates/index.js";
 import { parseRuneflow } from "./parser.js";
 import { validateRuneflow } from "./validator.js";
+import { slugify } from "./init-utils.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -47,10 +48,6 @@ const LOCAL_MODEL_PATH = path.join(LOCAL_MODEL_CACHE_DIR, LOCAL_MODEL_NAME);
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function slugify(str) {
-  return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
 
 function ask(rl, question) {
   return new Promise((resolve) => {
@@ -128,17 +125,21 @@ async function downloadModel(log) {
 
     function doRequest(url, redirectCount = 0) {
       if (redirectCount > 5) {
+        file.destroy();
         reject(new Error("Too many redirects downloading model"));
         return;
       }
 
       https.get(url, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume(); // drain and release the socket
           doRequest(res.headers.location, redirectCount + 1);
           return;
         }
 
         if (res.statusCode !== 200) {
+          res.resume();
+          file.destroy();
           reject(new Error(`Model download failed: HTTP ${res.statusCode}`));
           return;
         }
@@ -164,6 +165,7 @@ async function downloadModel(log) {
           resolve();
         });
       }).on("error", (err) => {
+        file.destroy();
         reject(err);
       });
     }
@@ -373,10 +375,11 @@ async function runGenerationMode(signals, options, { provider, model, isCloud, i
   await fs.writeFile(skillFile, content, "utf8");
   log(`✅ Created ${skillFile}`);
 
-  // Write runtime.js
+  // Write runtime.js — use local handler only when the local model is actually in use
   const runtimeExists = await fileExists(runtimeFile);
   if (!runtimeExists || force) {
-    await fs.writeFile(runtimeFile, buildLocalRuntime(), "utf8");
+    const runtimeContent = provider === "local" ? buildLocalRuntime() : buildPlaceholderRuntime();
+    await fs.writeFile(runtimeFile, runtimeContent, "utf8");
     log(`✅ Created ${runtimeFile}`);
   }
 

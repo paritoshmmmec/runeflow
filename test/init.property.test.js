@@ -43,9 +43,9 @@ test("Property 11: All written file paths appear in stdout for any flag combinat
       async ({ noPolish, noLocalLlm, name, template }) => {
         const dir = await makeTmpDir();
         const capturedLines = [];
+        const origLog = console.log;
 
         try {
-          const origLog = console.log;
           console.log = (...args) => capturedLines.push(args.join(" "));
 
           await runInit({
@@ -57,8 +57,6 @@ test("Property 11: All written file paths appear in stdout for any flag combinat
             name,
             template,
           });
-
-          console.log = origLog;
 
           // Find all files written to the temp dir
           const entries = await fs.readdir(dir);
@@ -73,7 +71,7 @@ test("Property 11: All written file paths appear in stdout for any flag combinat
             );
           }
         } finally {
-          console.log = console.log;
+          console.log = origLog;
           await fs.rm(dir, { recursive: true, force: true });
         }
       },
@@ -103,6 +101,7 @@ test("Property 13: Question count never exceeds one — non-TTY mode asks zero q
         const dir = await makeTmpDir();
         const capturedLines = [];
 
+        const origLog = console.log;
         try {
           // Write a package.json with the random integrations/scripts
           const deps = Object.fromEntries(
@@ -117,8 +116,6 @@ test("Property 13: Question count never exceeds one — non-TTY mode asks zero q
             JSON.stringify({ name: "test-repo", dependencies: deps, scripts: scriptMap }),
             "utf8",
           );
-
-          const origLog = console.log;
           console.log = (...args) => capturedLines.push(args.join(" "));
 
           await runInit({
@@ -139,7 +136,7 @@ test("Property 13: Question count never exceeds one — non-TTY mode asks zero q
             `Expected at most 1 clarifying question, got ${questionCount}`,
           );
         } finally {
-          console.log = console.log;
+          console.log = origLog;
           await fs.rm(dir, { recursive: true, force: true });
         }
       },
@@ -217,8 +214,9 @@ test("Property 10: Local model cache is reused — no download when model file e
   const dir = await makeTmpDir();
   const capturedLines = [];
 
+  const origLog = console.log;
+
   try {
-    const origLog = console.log;
     console.log = (...args) => capturedLines.push(args.join(" "));
 
     // Use --no-local-llm to avoid actual download
@@ -238,7 +236,7 @@ test("Property 10: Local model cache is reused — no download when model file e
       "Should not see download messages when --no-local-llm is set",
     );
   } finally {
-    console.log = console.log;
+    console.log = origLog;
     await fs.rm(dir, { recursive: true, force: true });
   }
 });

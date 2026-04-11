@@ -1,6 +1,7 @@
 import path from "node:path";
 import { parseRuneflow } from "./parser.js";
 import { validateRuneflow } from "./validator.js";
+import { slugify } from "./init-utils.js";
 
 const DEFAULT_PROVIDER = "cerebras";
 const DEFAULT_MODEL = "qwen-3-235b-a22b-instruct-2507";
@@ -18,10 +19,6 @@ const BUILTIN_TOOLS = new Set([
   "util.fail",
   "util.complete",
 ]);
-
-function slugify(str) {
-  return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
 
 /**
  * Derive skill name and slug from source and options.
