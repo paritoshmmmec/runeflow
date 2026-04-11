@@ -232,3 +232,234 @@ output {
   assert.deepEqual(result.toolCallsByStep.read_name, [{ path: "Alice" }]);
   assert.deepEqual(result.toolCalls["file.read"], [{ path: "Alice" }]);
 });
+
+// ─── Task 3.3: Missing tool mock error includes step id and fixture key path ──
+
+test("runTest throws descriptive error when tool mock is missing (step id + fixture path)", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-missing-tool-mock-"));
+  const definition = parseRuneflow(`---
+name: test-missing-tool-mock
+description: Missing tool mock
+inputs: {}
+outputs:
+  val: string
+---
+\`\`\`runeflow
+step fetch type=tool {
+  tool: file.read
+  with: { path: "x.txt" }
+  out: { val: string }
+}
+output { val: steps.fetch.val }
+\`\`\`
+`);
+
+  const fixture = {
+    inputs: {},
+    mocks: { tools: {}, llm: {} },
+    expect: { status: "success" },
+  };
+
+  const result = await runTest(definition, fixture, { runsDir });
+
+  // The run should fail — the error message surfaces in the run error or step error
+  assert.equal(result.pass, false);
+  // The error message is in the run error or the step that failed
+  const runErrorMsg = result.run?.error?.message ?? result.failures[0]?.actual?.error ?? "";
+  const stepErrorMsg = result.run?.steps?.find((s) => s.status === "failed")?.error?.message ?? "";
+  const errorMsg = runErrorMsg || stepErrorMsg;
+  assert.match(errorMsg, /fetch/);
+  assert.match(errorMsg, /fixture\.mocks\.tools\.fetch/);
+});
+
+// ─── Task 3.4: Missing LLM mock error includes step id and fixture key path ───
+
+test("runTest throws descriptive error when llm mock is missing (step id + fixture path)", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-missing-llm-mock-"));
+  const definition = parseRuneflow(`---
+name: test-missing-llm-mock
+description: Missing llm mock
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock
+  model: base
+---
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "Write a title"
+  schema: { title: string }
+}
+output { title: steps.draft.title }
+\`\`\`
+`);
+
+  const fixture = {
+    inputs: {},
+    mocks: { tools: {}, llm: {} },
+    expect: { status: "success" },
+  };
+
+  const result = await runTest(definition, fixture, { runsDir });
+
+  assert.equal(result.pass, false);
+  const runErrorMsg = result.run?.error?.message ?? result.failures[0]?.actual?.error ?? "";
+  const stepErrorMsg = result.run?.steps?.find((s) => s.status === "failed")?.error?.message ?? "";
+  const errorMsg = runErrorMsg || stepErrorMsg;
+  assert.match(errorMsg, /draft/);
+  assert.match(errorMsg, /fixture\.mocks\.llm\.draft/);
+});
+
+// ─── Task 3.6: Call assertion failures include step id, expected, and actual ──
+
+test("runTest call assertion failure includes step id, expected inputs, and actual inputs", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-call-assert-"));
+  const definition = parseRuneflow(`---
+name: test-call-assert
+description: Call assertion mismatch
+inputs:
+  name: string
+outputs:
+  content: string
+---
+\`\`\`runeflow
+step read type=tool {
+  tool: file.read
+  with: { path: inputs.name }
+  out: { content: string }
+}
+output { content: steps.read.content }
+\`\`\`
+`);
+
+  const fixture = {
+    inputs: { name: "actual.txt" },
+    mocks: {
+      tools: { read: { content: "hello" } },
+      llm: {},
+    },
+    expect: {
+      status: "success",
+      calls: {
+        tools: {
+          // Expect a different path than what was actually called
+          read: [{ path: "expected.txt" }],
+        },
+      },
+    },
+  };
+
+  const result = await runTest(definition, fixture, { runsDir });
+
+  assert.equal(result.pass, false);
+  // Find the failure for the call assertion
+  const callFailure = result.failures.find((f) => f.path.startsWith("calls.tools.read"));
+  assert.ok(callFailure, "Should have a failure for calls.tools.read");
+  // The path encodes the step id
+  assert.match(callFailure.path, /read/);
+  // expected and actual are present
+  assert.ok(callFailure.expected !== undefined);
+  assert.ok(callFailure.actual !== undefined);
+});
+
+// ─── Task 4.3: LLM mock entries keyed by step id ─────────────────────────────
+
+test("runTest uses llm mocks keyed by step id (not provider)", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-llm-step-key-"));
+  const definition = parseRuneflow(`---
+name: test-llm-step-key
+description: LLM mock keyed by step id
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock
+  model: base
+---
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "Write a title"
+  schema: { title: string }
+}
+output { title: steps.draft.title }
+\`\`\`
+`);
+
+  const fixture = {
+    inputs: {},
+    mocks: {
+      tools: {},
+      llm: {
+        draft: { title: "feat: keyed by step id" },
+      },
+    },
+    expect: {
+      status: "success",
+      outputs: { title: "feat: keyed by step id" },
+    },
+  };
+
+  const result = await runTest(definition, fixture, { runsDir });
+  assert.equal(result.pass, true, `Failures: ${JSON.stringify(result.failures)}`);
+  assert.deepEqual(result.run.outputs.title, "feat: keyed by step id");
+});
+
+// ─── Task 4.4: loadFixture validates required fields ─────────────────────────
+
+import { loadFixture } from "../src/test-runner.js";
+
+test("loadFixture throws descriptive error when 'inputs' field is missing", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-"));
+  const fixturePath = path.join(tempDir, "fixture.json");
+  await fs.writeFile(fixturePath, JSON.stringify({ mocks: {}, expect: {} }));
+
+  await assert.rejects(
+    () => loadFixture(fixturePath),
+    (err) => {
+      assert.match(err.message, /inputs/);
+      assert.match(err.message, /missing required field/);
+      return true;
+    },
+  );
+});
+
+test("loadFixture throws descriptive error when 'mocks' field is missing", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-"));
+  const fixturePath = path.join(tempDir, "fixture.json");
+  await fs.writeFile(fixturePath, JSON.stringify({ inputs: {}, expect: {} }));
+
+  await assert.rejects(
+    () => loadFixture(fixturePath),
+    (err) => {
+      assert.match(err.message, /mocks/);
+      assert.match(err.message, /missing required field/);
+      return true;
+    },
+  );
+});
+
+test("loadFixture throws descriptive error when 'expect' field is missing", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-"));
+  const fixturePath = path.join(tempDir, "fixture.json");
+  await fs.writeFile(fixturePath, JSON.stringify({ inputs: {}, mocks: {} }));
+
+  await assert.rejects(
+    () => loadFixture(fixturePath),
+    (err) => {
+      assert.match(err.message, /expect/);
+      assert.match(err.message, /missing required field/);
+      return true;
+    },
+  );
+});
+
+test("loadFixture returns parsed fixture when all required fields are present", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-fixture-validate-ok-"));
+  const fixturePath = path.join(tempDir, "fixture.json");
+  const data = { inputs: { x: 1 }, mocks: { tools: {}, llm: {} }, expect: { status: "success" } };
+  await fs.writeFile(fixturePath, JSON.stringify(data));
+
+  const fixture = await loadFixture(fixturePath);
+  assert.deepEqual(fixture, data);
+});

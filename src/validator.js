@@ -239,7 +239,9 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
       const field = segments[1];
       const available = isPlainObject(availableInputs) ? Object.keys(availableInputs) : [];
       const suggestion = field ? didYouMean(field, available) : null;
-      const hint = suggestion ? ` (did you mean 'inputs.${suggestion}'?)` : available.length ? ` (available: ${available.map((k) => `inputs.${k}`).join(", ")})` : "";
+      const availableHint = available.length ? ` (available inputs: ${available.join(", ")})` : "";
+      const didYouMeanHint = suggestion ? ` (did you mean 'inputs.${suggestion}'?)` : "";
+      const hint = availableHint || didYouMeanHint;
       issues.push(`${location}: unknown input reference '${pathExpression}'${hint}`);
     }
     return;
@@ -252,7 +254,9 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
     if (!stepSchema) {
       const availableStepIds = [...availableSteps.keys()];
       const suggestion = stepId ? didYouMean(stepId, availableStepIds) : null;
-      const hint = suggestion ? ` (did you mean 'steps.${suggestion}...'?)` : availableStepIds.length ? ` (available steps: ${availableStepIds.join(", ")})` : "";
+      const hint = suggestion
+        ? ` (did you mean 'steps.${suggestion}...'?)`
+        : ` (available steps: ${availableStepIds.join(", ") || "none"})`;
       issues.push(`${location}: unknown or forward step reference '${pathExpression}'${hint}`);
       return;
     }
@@ -556,7 +560,8 @@ export function validateSkill(definition, options = {}) {
 
     if (followingIds.length !== step.steps.length || followingIds.join(",") !== step.steps.join(",")) {
       issues.push(
-        `parallel '${step.id}' child steps must be declared immediately after the parallel block in matching order`,
+        `parallel '${step.id}' child steps must be declared immediately after the parallel block in matching order` +
+        ` (expected: [${step.steps.join(", ")}], actual: [${followingIds.join(", ")}])`,
       );
     }
 
@@ -627,7 +632,8 @@ export function validateSkill(definition, options = {}) {
       }
 
       if (!stepIndex.has(target)) {
-        issues.push(`step '${step.id}' ${label} target '${target}' does not exist`);
+        const available = [...stepIndex.keys()].join(", ");
+        issues.push(`step '${step.id}' ${label} target '${target}' does not exist (available steps: ${available})`);
         continue;
       }
 
@@ -727,9 +733,12 @@ export function validateSkill(definition, options = {}) {
     }
   }
 
+  // Deduplicate: a single root cause must not produce multiple identical issue messages.
+  const uniqueIssues = [...new Set(issues)];
+
   return {
-    valid: issues.length === 0,
-    issues,
+    valid: uniqueIssues.length === 0,
+    issues: uniqueIssues,
     warnings,
   };
 }

@@ -105,7 +105,7 @@ function buildMockRuntime(mocks = {}, definition = {}) {
 
     if (!Object.prototype.hasOwnProperty.call(llmMocks, stepId)) {
       throw new Error(
-        `No mock defined for llm step '${stepId}'. Add it to fixture.mocks.llm.`,
+        `No mock defined for llm step '${stepId}'. Add it to fixture at: fixture.mocks.llm.${stepId}`,
       );
     }
     const mockValue = llmMocks[stepId];
@@ -160,8 +160,12 @@ function buildMockRuntime(mocks = {}, definition = {}) {
         : toolName;
 
       if (!Object.prototype.hasOwnProperty.call(toolMocks, mockKey)) {
-        const identity = stepId ? `tool step '${stepId}' (${toolName})` : `tool '${toolName}'`;
-        throw new Error(`No mock defined for ${identity}. Add it to fixture.mocks.tools.`);
+        if (stepId) {
+          throw new Error(
+            `No mock defined for tool step '${stepId}'. Add it to fixture at: fixture.mocks.tools.${stepId}`,
+          );
+        }
+        throw new Error(`No mock defined for tool '${toolName}'. Add it to fixture at: fixture.mocks.tools.${toolName}`);
       }
 
       const mockValue = toolMocks[mockKey];
@@ -309,5 +313,11 @@ export async function runTest(definition, fixture, options = {}) {
 export async function loadFixture(fixturePath) {
   const absolutePath = path.resolve(process.cwd(), fixturePath);
   const raw = await fs.readFile(absolutePath, "utf8");
-  return JSON.parse(raw);
+  const fixture = JSON.parse(raw);
+  for (const field of ["inputs", "mocks", "expect"]) {
+    if (!Object.prototype.hasOwnProperty.call(fixture, field)) {
+      throw new Error(`Fixture at '${fixturePath}' is missing required field: '${field}'`);
+    }
+  }
+  return fixture;
 }

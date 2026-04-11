@@ -47,6 +47,56 @@ function loadDirRegistry(dir) {
   }));
 }
 
+function findPackageRoot(resolvedUrl, packageName) {
+  let currentDir = path.dirname(fileURLToPath(resolvedUrl));
+
+  while (true) {
+    const packageJsonPath = path.join(currentDir, "package.json");
+    if (fs.existsSync(packageJsonPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+        if (pkg?.name === packageName) {
+          return currentDir;
+        }
+      } catch {
+        // Ignore unreadable package.json files while walking upward.
+      }
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+
+    currentDir = parentDir;
+  }
+}
+
+export function resolvePackageRegistryProvidersDir(options = {}) {
+  const moduleUrl = options.moduleUrl ?? import.meta.url;
+  const resolvePackage = options.resolvePackage
+    ?? ((specifier) => import.meta.resolve?.(specifier));
+
+  try {
+    const packageUrl = resolvePackage("runeflow-registry");
+    if (typeof packageUrl === "string") {
+      const packageRoot = findPackageRoot(packageUrl, "runeflow-registry");
+      if (packageRoot) {
+        return path.join(packageRoot, "providers");
+      }
+    }
+  } catch {
+    // Fall back to legacy relative lookups below.
+  }
+
+  const candidates = [
+    path.resolve(fileURLToPath(moduleUrl), "../../node_modules/runeflow-registry/providers"),
+    path.resolve(fileURLToPath(moduleUrl), "../../../runeflow-registry/providers"),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
 export function normalizeToolRegistry(registry) {
   if (!registry) {
     return new Map();
@@ -90,11 +140,9 @@ export function loadBaseToolRegistry(options = {}) {
   //    This is zero-config — install runeflow-registry and schemas appear in tools list.
   let packageRegistry = new Map();
   try {
-    const registryProvidersDir = path.resolve(
-      fileURLToPath(import.meta.url),
-      "../../node_modules/runeflow-registry/providers",
-    );
-    if (fs.existsSync(registryProvidersDir)) {
+    const registryProvidersDir = options.packageRegistryProvidersDir
+      ?? resolvePackageRegistryProvidersDir();
+    if (registryProvidersDir && fs.existsSync(registryProvidersDir)) {
       for (const entry of fs.readdirSync(registryProvidersDir, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
         const jsonPath = path.join(registryProvidersDir, entry.name, "schemas.json");

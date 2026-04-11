@@ -81,6 +81,7 @@ On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runefl
 ## Contents
 
 - [Quickstart](#quickstart)
+- [Core Loop](#core-loop)
 - [File shape](#file-shape)
 - [Step kinds](#step-kinds)
 - [Expressions](#expressions)
@@ -211,6 +212,19 @@ runeflow validate ./draft-pr.runeflow.md
 ```
 
 Static — no API calls, no git. Catches broken references and schema mismatches before execution.
+
+---
+
+## Core Loop
+
+The commands an author uses in order, from first write to verified test:
+
+1. `runeflow validate <file>` — Checks a skill file for errors before running it.
+2. `runeflow dryrun <file> --input '{"key":"value"}'` — Resolves all bindings and shows what each step would do without executing anything.
+3. `runeflow run <file> --input '{"key":"value"}'` — Executes the skill with real tool calls, LLM calls, and shell commands.
+4. `runeflow inspect-run <run-id>` — Reads and formats run artifacts to help diagnose failures.
+5. `runeflow run <file> --record-fixture <path>` — Records a completed run as a reusable fixture file for testing.
+6. `runeflow test <file> --fixture <fixture.json>` — Runs a skill against a fixture file with mocked tools and LLM calls to verify behavior.
 
 ---
 

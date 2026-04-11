@@ -370,6 +370,14 @@ export async function runCli(argv) {
     }, null, 2));
 
     if (!result.pass) {
+      console.error(`FAIL  ${failureCount} assertion(s) failed`);
+      console.error("");
+      for (let i = 0; i < result.failures.length; i++) {
+        const f = result.failures[i];
+        console.error(`  ${i + 1}) ${f.path}`);
+        console.error(`       expected: ${JSON.stringify(f.expected)}`);
+        console.error(`       actual:   ${JSON.stringify(f.actual)}`);
+      }
       process.exitCode = 1;
     }
     return;
@@ -440,10 +448,11 @@ export async function runCli(argv) {
         const tokens = step.token_usage
           ? `${step.token_usage.prompt_tokens ?? 0}p/${step.token_usage.completion_tokens ?? 0}c`
           : "";
+        const statusDisplay = step.status === "failed" ? `✗ ${step.status}` : step.status === "success" ? `✓ ${step.status}` : step.status;
         return {
           id: step.id,
           kind: step.kind,
-          status: step.status,
+          status: statusDisplay,
           duration: durationMs !== null ? `${durationMs}ms` : "-",
           attempts: step.attempts ?? 1,
           tokens,
@@ -464,6 +473,9 @@ export async function runCli(argv) {
         console.log(cols.map((col, i) => String(row[col] ?? "").padEnd(widths[i])).join("  "));
       }
       console.log(divider);
+      if (artifact.status === "halted_on_error" && artifact.halted_step_id) {
+        console.log(`Failed step: ${artifact.halted_step_id}`);
+      }
       if (artifact.error) {
         console.log(`Error: ${artifact.error.message}`);
       }
