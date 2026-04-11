@@ -96,6 +96,7 @@ const DEFAULT_ENV_ALLOWLIST = new Set([
   "COMPOSIO_TOOLKIT_VERSION_GITHUB",
   "COMPOSIO_TOOLKIT_VERSION_LINEAR",
   // Common integration variables
+  "GITHUB_TOKEN",
   "MCP_SERVER_URL",
   "MCP_AUTH_TOKEN",
   // Node / runtime
