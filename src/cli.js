@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import chokidar from "chokidar";
 import cron from "node-cron";
 import { assembleRuneflow } from "./assembler.js";
+import { dryrunRuneflow } from "./dryrun.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { runInit } from "./init.js";
 import { parseRuneflow } from "./parser.js";
@@ -203,6 +204,7 @@ export async function runCli(argv) {
   runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
   runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow import <file> [--output converted.runeflow.md]
+  runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
   runeflow tools list [--runtime ./runtime.js]
   runeflow tools inspect <tool-name> [--runtime ./runtime.js]`);
     return;
@@ -244,6 +246,21 @@ export async function runCli(argv) {
     const { run } = await executeRun(target, options);
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "dryrun") {
+    const target = positional[0];
+    const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
+    const definition = parseRuneflow(source, { sourcePath: target });
+    const runtime = await loadRuntime(options.runtime);
+    const inputArg = options.input ?? "{}";
+    const inputs = JSON.parse(inputArg);
+    const plan = dryrunRuneflow(definition, inputs, runtime);
+    console.log(JSON.stringify(plan, null, 2));
+    if (!plan.valid) {
       process.exitCode = 1;
     }
     return;

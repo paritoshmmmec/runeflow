@@ -385,6 +385,7 @@ runeflow tools inspect git.diff_summary
 runeflow init [--name <name>] [--provider <provider>]
 runeflow validate <file> [--runtime ./runtime.js]
 runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
+runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
 runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--prompt '{"step":"answer"}']
 runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
 runeflow assemble <file> --step <step-id> --input '{}' [--runtime ./runtime.js] [--output context.md]
@@ -393,6 +394,8 @@ runeflow import <file> [--output converted.runeflow.md]
 runeflow tools list [--runtime ./runtime.js]
 runeflow tools inspect <tool-name> [--runtime ./runtime.js]
 ```
+
+`dryrun` validates the skill, then walks every step resolving all bindings with the provided inputs — but executes nothing. No tool calls, no LLM calls, no shell commands. Shows exactly what each step *would* do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders (e.g. `"<string>"`, `0`, `false`) derived from the output schema.
 
 `resume` reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
 
