@@ -13,7 +13,7 @@
  *   "inputs": { "base_branch": "main" },
  *   "mocks": {
  *     "tools": {
- *       "git.current_branch": { "branch": "feat/x" }
+ *       "current_branch": { "branch": "feat/x" }
  *     },
  *     "llm": {
  *       "draft": { "title": "feat: x", "body": "Body." }
@@ -22,6 +22,14 @@
  *   "expect": {
  *     "status": "success",
  *     "outputs": { "title": "feat: x" },
+ *     "calls": {
+ *       "tools": {
+ *         "current_branch": [{}]
+ *       },
+ *       "llm": {
+ *         "draft": [{ "prompt": "Draft for feat/x", "input": {} }]
+ *       }
+ *     },
  *     "steps": { "draft": { "status": "success" } }
  *   }
  * }
@@ -85,6 +93,7 @@ function buildMockRuntime(mocks = {}, definition = {}) {
   const toolMocks = mocks.tools ?? {};
   const llmMocks = mocks.llm ?? {};
   const toolCalls = {};
+  const toolCallsByStep = {};
   const llmCalls = {};
 
   // We build a plain object for llms so it survives spreading in runtime.js
@@ -124,21 +133,55 @@ function buildMockRuntime(mocks = {}, definition = {}) {
 
   // Same for tools
   const tools = {};
-  for (const [toolName, mockValue] of Object.entries(toolMocks)) {
-    tools[toolName] = async (input) => {
+  const declaredToolNames = new Set(
+    (definition.workflow?.steps ?? [])
+      .filter((step) => step.kind === "tool")
+      .map((step) => step.tool),
+  );
+
+  for (const [key] of Object.entries(toolMocks)) {
+    const matchingStep = definition.workflow?.steps?.find((step) => step.kind === "tool" && step.id === key);
+    declaredToolNames.add(matchingStep?.tool ?? key);
+  }
+
+  for (const toolName of declaredToolNames) {
+    tools[toolName] = async (input, context = {}) => {
+      const stepId = context.step?.id ?? null;
       toolCalls[toolName] = toolCalls[toolName] ?? [];
       toolCalls[toolName].push(input);
-      return typeof mockValue === "function" ? mockValue(input) : mockValue;
+
+      if (stepId) {
+        toolCallsByStep[stepId] = toolCallsByStep[stepId] ?? [];
+        toolCallsByStep[stepId].push(input);
+      }
+
+      const mockKey = stepId && Object.prototype.hasOwnProperty.call(toolMocks, stepId)
+        ? stepId
+        : toolName;
+
+      if (!Object.prototype.hasOwnProperty.call(toolMocks, mockKey)) {
+        const identity = stepId ? `tool step '${stepId}' (${toolName})` : `tool '${toolName}'`;
+        throw new Error(`No mock defined for ${identity}. Add it to fixture.mocks.tools.`);
+      }
+
+      const mockValue = toolMocks[mockKey];
+      return typeof mockValue === "function" ? mockValue(input, context) : mockValue;
     };
   }
 
-  return { tools, llms, _toolCalls: toolCalls, _llmCalls: llmCalls };
+  return {
+    tools,
+    llms,
+    _toolCalls: toolCalls,
+    _toolCallsByStep: toolCallsByStep,
+    _llmCalls: llmCalls,
+  };
 }
 
 
 // ─── Assertion runner ─────────────────────────────────────────────────────────
 
-function assertRun(run, expect_) {
+function assertRun(run, expect_, calls = {}) {
   const failures = [];
 
   if (expect_ == null) return failures;
@@ -151,6 +194,18 @@ function assertRun(run, expect_) {
   // Top-level outputs
   if (expect_.outputs !== undefined) {
     failures.push(...collectFailures(expect_.outputs, run.outputs, "outputs"));
+  }
+
+  if (expect_.calls?.tools !== undefined) {
+    failures.push(...collectFailures(expect_.calls.tools, calls.toolCallsByStep, "calls.tools"));
+  }
+
+  if (expect_.calls?.tools_by_name !== undefined) {
+    failures.push(...collectFailures(expect_.calls.tools_by_name, calls.toolCalls, "calls.tools_by_name"));
+  }
+
+  if (expect_.calls?.llm !== undefined) {
+    failures.push(...collectFailures(expect_.calls.llm, calls.llmCalls, "calls.llm"));
   }
 
   // Per-step assertions
@@ -199,6 +254,7 @@ export async function runTest(definition, fixture, options = {}) {
     },
     llms: mockRuntime.llms,
     _toolCalls: mockRuntime._toolCalls,
+    _toolCallsByStep: mockRuntime._toolCallsByStep,
     _llmCalls: mockRuntime._llmCalls,
   };
 
@@ -223,17 +279,23 @@ export async function runTest(definition, fixture, options = {}) {
       failures: [failure],
       run: null,
       toolCalls: mockRuntime._toolCalls,
+      toolCallsByStep: mockRuntime._toolCallsByStep,
       llmCalls: mockRuntime._llmCalls,
     };
   }
 
-  const failures = assertRun(run, fixture.expect);
+  const failures = assertRun(run, fixture.expect, {
+    toolCalls: mockRuntime._toolCalls,
+    toolCallsByStep: mockRuntime._toolCallsByStep,
+    llmCalls: mockRuntime._llmCalls,
+  });
 
   return {
     pass: failures.length === 0,
     failures,
     run,
     toolCalls: mockRuntime._toolCalls,
+    toolCallsByStep: mockRuntime._toolCallsByStep,
     llmCalls: mockRuntime._llmCalls,
   };
 }

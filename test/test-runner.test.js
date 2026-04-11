@@ -166,4 +166,69 @@ step only_step type=tool {
   assert.ok(result.failures.some(f => f.path === "steps.other_step"));
 });
 
+test("runTest supports tool mocks keyed by step id and call assertions", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-step-mock-"));
+  const definition = parseRuneflow(`---
+name: test-step-tool-mock
+description: Tool step id mocks
+inputs:
+  name: string
+outputs:
+  greeting: string
+llm:
+  provider: mock
+  model: baseline
+---
+\`\`\`runeflow
+step read_name type=tool {
+  tool: file.read
+  with: { path: inputs.name }
+  out: { content: string }
+}
 
+step draft type=llm {
+  prompt: "Greet {{ steps.read_name.content }}"
+  input: { content: steps.read_name.content }
+  schema: { greeting: string }
+}
+
+output {
+  greeting: steps.draft.greeting
+}
+\`\`\`
+`);
+
+  const fixture = {
+    inputs: { name: "Alice" },
+    mocks: {
+      tools: {
+        read_name: { content: "Alice" }
+      },
+      llm: {
+        draft: { greeting: "Hello, Alice!" }
+      }
+    },
+    expect: {
+      status: "success",
+      outputs: { greeting: "Hello, Alice!" },
+      calls: {
+        tools: {
+          read_name: [{ path: "Alice" }]
+        },
+        llm: {
+          draft: [{
+            step: "draft",
+            prompt: "Greet Alice",
+            input: { content: "Alice" }
+          }]
+        }
+      }
+    }
+  };
+
+  const result = await runTest(definition, fixture, { runsDir });
+
+  assert.equal(result.pass, true, `Failures: ${JSON.stringify(result.failures)}`);
+  assert.deepEqual(result.toolCallsByStep.read_name, [{ path: "Alice" }]);
+  assert.deepEqual(result.toolCalls["file.read"], [{ path: "Alice" }]);
+});

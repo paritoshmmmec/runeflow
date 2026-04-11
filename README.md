@@ -464,13 +464,13 @@ runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 
 `dryrun` — validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. Shows exactly what each step would do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders derived from the output schema.
 
-`test` — runs a skill against a fixture with all LLM and tool calls mocked. Write fixtures by hand or generate them from a real run with `run --record-fixture <path>`.
+`test` — runs a skill against a fixture with all LLM and tool calls mocked. Tool mocks may be keyed by step id or tool name; recorded fixtures use step ids so multiple steps can mock the same tool independently. Test output includes the observed tool and LLM call traces to help tighten fixtures. Write fixtures by hand or generate them from a real run with `run --record-fixture <path>`.
 
 `resume` — reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
 
 `watch` — runs a `.runeflow.md` on a cron schedule, on file changes, or both.
 
-`assemble` — executes all steps before a target `llm` step (tool, cli, transform, and any earlier llm steps), resolves the prompt with real values, and writes a clean Markdown context file for an agent to load. If earlier llm steps exist, they run and consume tokens. See [Assemble mode](#assemble-mode).
+`assemble` — executes all steps before a target `llm` step (tool, cli, transform, `parallel`, and any earlier llm steps), resolves the prompt with real values, and writes a clean Markdown context file for an agent to load. JSON output also includes pre-step execution metadata and notes about token-spending llm pre-steps or placeholder human input values. If earlier llm steps exist, they run and consume tokens. See [Assemble mode](#assemble-mode).
 
 `inspect-run` — reads a run artifact by run ID. Use `--format table` for a compact step timeline. Use `--step <id>` to drill into a single step's artifact.
 

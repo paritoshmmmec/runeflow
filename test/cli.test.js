@@ -908,6 +908,139 @@ output {
   }
 });
 
+test("runCli run --record-fixture records tool mocks by step id", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-tool-fixture-"));
+  const originalCwd = process.cwd();
+  const fixturePath = path.join(tempDir, "fixture.json");
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: fixture-tool-demo
+description: Fixture recording demo for tools
+version: 0.1
+inputs:
+  path: string
+outputs:
+  exists: boolean
+---
+
+\`\`\`runeflow
+step check_file type=tool {
+  tool: file.exists
+  with: { path: inputs.path }
+  out: { exists: boolean }
+}
+
+output {
+  exists: steps.check_file.exists
+}
+\`\`\`
+`,
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    await fs.writeFile(path.join(tempDir, "present.txt"), "ok\n");
+    await captureStdout(() =>
+      runCli([
+        "run", "workflow.runeflow.md",
+        "--input", '{"path":"./present.txt"}',
+        "--record-fixture", fixturePath,
+      ]),
+    );
+
+    const fixture = JSON.parse(await fs.readFile(fixturePath, "utf8"));
+    assert.deepEqual(fixture.inputs, { path: "./present.txt" });
+    assert.deepEqual(fixture.mocks.tools.check_file, { exists: true });
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runCli test includes call traces and summary", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-test-summary-"));
+  const originalCwd = process.cwd();
+
+  await fs.writeFile(
+    path.join(tempDir, "workflow.runeflow.md"),
+    `---
+name: cli-test-demo
+description: CLI test summary demo
+version: 0.1
+inputs:
+  path: string
+outputs:
+  content: string
+llm:
+  provider: mock
+  model: base
+---
+
+\`\`\`runeflow
+step read_file type=tool {
+  tool: file.read
+  with: { path: inputs.path }
+  out: { content: string }
+}
+
+step draft type=llm {
+  prompt: "Summarize {{ steps.read_file.content }}"
+  input: { content: steps.read_file.content }
+  schema: { content: string }
+}
+
+output {
+  content: steps.draft.content
+}
+\`\`\`
+`,
+  );
+
+  await fs.writeFile(
+    path.join(tempDir, "fixture.json"),
+    JSON.stringify({
+      inputs: { path: "README.md" },
+      mocks: {
+        tools: {
+          read_file: { content: "hello" },
+        },
+        llm: {
+          draft: { content: "summary" },
+        },
+      },
+      expect: {
+        status: "success",
+        calls: {
+          tools: {
+            read_file: [{ path: "README.md" }],
+          },
+        },
+      },
+    }, null, 2),
+  );
+
+  process.chdir(tempDir);
+
+  try {
+    const output = await captureStdout(() =>
+      runCli(["test", "./workflow.runeflow.md", "--fixture", "./fixture.json"]),
+    );
+    const result = JSON.parse(output);
+
+    assert.equal(result.pass, true);
+    assert.equal(result.summary, "Fixture passed.");
+    assert.deepEqual(result.tool_calls.read_file, [{ path: "README.md" }]);
+    assert.deepEqual(result.tool_calls_by_name["file.read"], [{ path: "README.md" }]);
+    assert.equal(result.llm_calls.draft[0].prompt, "Summarize hello");
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runCli skills list shows skills from .runeflow/skills/", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-skills-"));
   const originalCwd = process.cwd();

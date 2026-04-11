@@ -28,6 +28,195 @@ function buildStepState(completedSteps, inputs, consts) {
   };
 }
 
+function summarizeAssembledStep(stepRun) {
+  const summary = {
+    id: stepRun.id,
+    kind: stepRun.kind,
+    status: stepRun.status,
+  };
+
+  if (stepRun.kind === "parallel" && Array.isArray(stepRun.child_ids)) {
+    summary.child_ids = [...stepRun.child_ids];
+  }
+
+  if (stepRun.kind === "branch") {
+    summary.matched = stepRun.outputs?.matched ?? false;
+    summary.target = stepRun.outputs?.target ?? null;
+  }
+
+  if (stepRun.kind === "human_input" && stepRun.input_source) {
+    summary.input_source = stepRun.input_source;
+  }
+
+  if (stepRun.kind === "llm" && stepRun.provider) {
+    summary.provider = stepRun.provider;
+  }
+
+  return summary;
+}
+
+function buildAssemblyMetadata(completedSteps) {
+  const preSteps = completedSteps.map(summarizeAssembledStep);
+  const llmPreSteps = preSteps.filter((step) => step.kind === "llm");
+  const placeholderInputs = preSteps.filter(
+    (step) => step.kind === "human_input" && step.input_source === "placeholder",
+  );
+  const defaultInputs = preSteps.filter(
+    (step) => step.kind === "human_input" && step.input_source === "default",
+  );
+  const notes = [];
+
+  if (llmPreSteps.length > 0) {
+    notes.push(
+      `${llmPreSteps.length} earlier llm step${llmPreSteps.length === 1 ? "" : "s"} `
+      + `ran during assembly and may have consumed tokens.`,
+    );
+  }
+
+  if (defaultInputs.length > 0) {
+    notes.push(
+      `${defaultInputs.length} human_input step${defaultInputs.length === 1 ? "" : "s"} `
+      + `used the configured default value during assembly.`,
+    );
+  }
+
+  if (placeholderInputs.length > 0) {
+    notes.push(
+      `${placeholderInputs.length} human_input step${placeholderInputs.length === 1 ? "" : "s"} `
+      + `had no default, so assembly inserted "<pending>".`,
+    );
+  }
+
+  return {
+    pre_steps: preSteps,
+    stats: {
+      total_pre_steps: preSteps.length,
+      llm_pre_steps: llmPreSteps.length,
+      human_input_defaults: defaultInputs.length,
+      human_input_placeholders: placeholderInputs.length,
+    },
+    notes,
+  };
+}
+
+async function executeAssembledStep(step, state, definition, environment, options) {
+  if (step.skip_if && evaluateExpression(step.skip_if, state)) {
+    return { id: step.id, kind: step.kind, status: "skipped", outputs: {} };
+  }
+
+  const { tools, llms } = environment;
+
+  if (step.kind === "tool") {
+    const tool = tools[step.tool];
+    if (!tool) {
+      throw new RuntimeError(
+        `Tool '${step.tool}' is not registered. Pass --runtime to provide custom tools.`,
+      );
+    }
+    const resolvedInput = resolveBindings(step.with ?? {}, state);
+    const outputs = await tool(resolvedInput, { step, state });
+    return { id: step.id, kind: step.kind, status: "success", outputs: deepClone(outputs) };
+  }
+
+  if (step.kind === "llm") {
+    const llmConfig = step.llm ?? definition.metadata.llm;
+    if (!llmConfig) {
+      throw new RuntimeError(`Step '${step.id}' has no llm configuration.`);
+    }
+    const handler = llms?.[llmConfig.provider];
+    if (typeof handler !== "function") {
+      throw new RuntimeError(
+        `No LLM handler registered for provider '${llmConfig.provider}'. Pass --runtime to provide LLM handlers.`,
+      );
+    }
+    const resolvedPrompt = resolveBindings(step.prompt, state);
+    const resolvedInput = resolveBindings(step.input ?? {}, state);
+    const docs = step.docs
+      ? (definition.docBlocks?.[step.docs] ?? definition.docs)
+      : definition.docs;
+    const outputs = await handler({
+      step,
+      llm: deepClone(llmConfig),
+      prompt: resolvedPrompt,
+      input: resolvedInput,
+      schema: step.schema,
+      state,
+      docs,
+      context: { docs, metadata: deepClone(definition.metadata), source_path: definition.sourcePath ?? null },
+    });
+    return {
+      id: step.id,
+      kind: step.kind,
+      status: "success",
+      outputs: deepClone(outputs),
+      provider: llmConfig.provider,
+    };
+  }
+
+  if (step.kind === "transform") {
+    const resolvedInput = resolveBindings(step.input, state);
+    const outputs = evalTransformExpr(step.expr, resolvedInput);
+    return { id: step.id, kind: step.kind, status: "success", outputs: deepClone(outputs) };
+  }
+
+  if (step.kind === "cli") {
+    const resolvedCommand = resolveBindings(step.command, state);
+    if (typeof resolvedCommand !== "string" || !resolvedCommand.trim()) {
+      throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
+    }
+    const cwd = options?.cwd ?? process.cwd();
+    const timeout = step.timeout ?? 30_000;
+    let outputs;
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        process.platform === "win32" ? "cmd" : "sh",
+        process.platform === "win32" ? ["/c", resolvedCommand] : ["-c", resolvedCommand],
+        { cwd, timeout, maxBuffer: 10 * 1024 * 1024 },
+      );
+      outputs = { stdout: stdout ?? "", stderr: stderr ?? "", exit_code: 0 };
+    } catch (error) {
+      if (typeof error.code === "number") {
+        outputs = { stdout: error.stdout ?? "", stderr: error.stderr ?? "", exit_code: error.code };
+        if (step.allow_failure !== true) {
+          throw new RuntimeError(
+            `cli step '${step.id}' exited with code ${error.code}.\nstderr: ${error.stderr || "(empty)"}`,
+          );
+        }
+      } else {
+        throw new RuntimeError(`cli step '${step.id}' failed to execute: ${error.message}`);
+      }
+    }
+    return { id: step.id, kind: step.kind, status: "success", outputs };
+  }
+
+  if (step.kind === "branch") {
+    const matched = evaluateExpression(step.if, state);
+    const target = matched ? step.then : step.else;
+    return { id: step.id, kind: step.kind, status: "success", outputs: { matched, target } };
+  }
+
+  if (step.kind === "human_input") {
+    const hasDefault = step.default !== undefined;
+    const resolvedDefault = hasDefault
+      ? resolveBindings(step.default, state)
+      : "<pending>";
+    return {
+      id: step.id,
+      kind: step.kind,
+      status: "success",
+      outputs: { answer: resolvedDefault },
+      input_source: hasDefault ? "default" : "placeholder",
+    };
+  }
+
+  if (step.kind === "fail") {
+    const resolvedMessage = step.message ? resolveBindings(step.message, state) : "Explicit fail step hit.";
+    throw new RuntimeError(resolvedMessage);
+  }
+
+  throw new RuntimeError(`Unsupported step kind '${step.kind}'.`);
+}
+
 // ─── Pre-step executor ────────────────────────────────────────────────────────
 
 async function executePreSteps(definition, targetStepId, inputs, environment, options) {
@@ -43,7 +232,6 @@ async function executePreSteps(definition, targetStepId, inputs, environment, op
     throw new RuntimeError(`assemble only works on 'llm' steps. Step '${targetStepId}' is kind '${targetStep.kind}'.`);
   }
 
-  const { tools, llms } = environment;
   const completedSteps = [];
   const stepIndex = new Map(steps.map((s, i) => [s.id, i]));
   let i = 0;
@@ -52,90 +240,10 @@ async function executePreSteps(definition, targetStepId, inputs, environment, op
     const step = steps[i];
     const state = buildStepState(completedSteps, inputs, definition.consts);
 
-    // skip_if
-    if (step.skip_if && evaluateExpression(step.skip_if, state)) {
-      completedSteps.push({ id: step.id, kind: step.kind, outputs: {} });
-      i += 1;
-      continue;
-    }
-
-    if (step.kind === "tool") {
-      const tool = tools[step.tool];
-      if (!tool) {
-        throw new RuntimeError(
-          `Tool '${step.tool}' is not registered. Pass --runtime to provide custom tools.`,
-        );
-      }
-      const resolvedInput = resolveBindings(step.with ?? {}, state);
-      const outputs = await tool(resolvedInput, { step, state });
-      completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
-
-    } else if (step.kind === "llm") {
-      const llmConfig = step.llm ?? definition.metadata.llm;
-      if (!llmConfig) {
-        throw new RuntimeError(`Step '${step.id}' has no llm configuration.`);
-      }
-      const handler = llms?.[llmConfig.provider];
-      if (typeof handler !== "function") {
-        throw new RuntimeError(
-          `No LLM handler registered for provider '${llmConfig.provider}'. Pass --runtime to provide LLM handlers.`,
-        );
-      }
-      const resolvedPrompt = resolveBindings(step.prompt, state);
-      const resolvedInput = resolveBindings(step.input ?? {}, state);
-      const docs = step.docs
-        ? (definition.docBlocks?.[step.docs] ?? definition.docs)
-        : definition.docs;
-      const outputs = await handler({
-        step,
-        llm: deepClone(llmConfig),
-        prompt: resolvedPrompt,
-        input: resolvedInput,
-        schema: step.schema,
-        state,
-        docs,
-        context: { docs, metadata: deepClone(definition.metadata), source_path: definition.sourcePath ?? null },
-      });
-      completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
-
-    } else if (step.kind === "transform") {
-      const resolvedInput = resolveBindings(step.input, state);
-      const outputs = evalTransformExpr(step.expr, resolvedInput);
-      completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
-
-    } else if (step.kind === "cli") {
-      const resolvedCommand = resolveBindings(step.command, state);
-      if (typeof resolvedCommand !== "string" || !resolvedCommand.trim()) {
-        throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
-      }
-      const cwd = options?.cwd ?? process.cwd();
-      const timeout = step.timeout ?? 30_000;
-      let outputs;
-      try {
-        const { stdout, stderr } = await execFileAsync(
-          process.platform === "win32" ? "cmd" : "sh",
-          process.platform === "win32" ? ["/c", resolvedCommand] : ["-c", resolvedCommand],
-          { cwd, timeout, maxBuffer: 10 * 1024 * 1024 },
-        );
-        outputs = { stdout: stdout ?? "", stderr: stderr ?? "", exit_code: 0 };
-      } catch (error) {
-        if (typeof error.code === "number") {
-          outputs = { stdout: error.stdout ?? "", stderr: error.stderr ?? "", exit_code: error.code };
-          if (step.allow_failure !== true) {
-            throw new RuntimeError(
-              `cli step '${step.id}' exited with code ${error.code}.\nstderr: ${error.stderr || "(empty)"}`,
-            );
-          }
-        } else {
-          throw new RuntimeError(`cli step '${step.id}' failed to execute: ${error.message}`);
-        }
-      }
-      completedSteps.push({ id: step.id, kind: step.kind, outputs });
-
-    } else if (step.kind === "branch") {
-      const matched = evaluateExpression(step.if, state);
-      const target = matched ? step.then : step.else;
-      completedSteps.push({ id: step.id, kind: step.kind, outputs: { matched, target } });
+    if (step.kind === "branch") {
+      const branchResult = await executeAssembledStep(step, state, definition, environment, options);
+      completedSteps.push(branchResult);
+      const target = branchResult.outputs.target;
 
       if (target === "fail") {
         throw new RuntimeError(`Branch '${step.id}' routed to fail before reaching step '${targetStepId}'.`);
@@ -154,39 +262,37 @@ async function executePreSteps(definition, targetStepId, inputs, environment, op
       continue;
 
     } else if (step.kind === "parallel") {
-      // Execute child steps concurrently
       const childIds = step.steps ?? [];
+      const childState = buildStepState(completedSteps, inputs, definition.consts);
       const childResults = await Promise.all(childIds.map(async (childId) => {
         const childIdx = stepIndex.get(childId);
         if (childIdx === undefined) return null;
         const childStep = steps[childIdx];
-        const childState = buildStepState(completedSteps, inputs, definition.consts);
-        if (childStep.kind === "tool") {
-          const tool = tools[childStep.tool];
-          if (!tool) throw new RuntimeError(`Tool '${childStep.tool}' is not registered.`);
-          const resolvedInput = resolveBindings(childStep.with ?? {}, childState);
-          const outputs = await tool(resolvedInput, { step: childStep, state: childState });
-          return { id: childStep.id, kind: childStep.kind, outputs: deepClone(outputs) };
-        }
-        return { id: childStep.id, kind: childStep.kind, outputs: {} };
+        return executeAssembledStep(childStep, childState, definition, environment, options);
       }));
 
       for (const result of childResults) {
         if (result) completedSteps.push(result);
       }
 
-      // Skip past the child steps
+      const realizedChildren = childResults.filter(Boolean);
+      completedSteps.push({
+        id: step.id,
+        kind: step.kind,
+        status: "success",
+        child_ids: realizedChildren.map((result) => result.id),
+        outputs: {
+          results: realizedChildren.map((result) => result.outputs),
+          by_step: Object.fromEntries(realizedChildren.map((result) => [result.id, result.outputs])),
+          step_ids: realizedChildren.map((result) => result.id),
+        },
+      });
+
       i += childIds.length + 1;
       continue;
-
-    } else if (step.kind === "human_input") {
-      // Can't interactively prompt during assemble — use default or placeholder
-      const resolvedDefault = step.default !== undefined
-        ? resolveBindings(step.default, state)
-        : "<pending>";
-      completedSteps.push({ id: step.id, kind: step.kind, outputs: { answer: resolvedDefault } });
     }
 
+    completedSteps.push(await executeAssembledStep(step, state, definition, environment, options));
     i += 1;
   }
 
@@ -207,7 +313,7 @@ function schemaToMarkdown(schema) {
   return "```json\n" + JSON.stringify(schema, null, 2) + "\n```";
 }
 
-function renderAssembled({ definition, targetStep, resolvedPrompt, resolvedInput, docs }) {
+function renderAssembled({ definition, targetStep, resolvedPrompt, resolvedInput, docs, assembly }) {
   const skillName = definition.metadata.name ?? "skill";
   const lines = [];
 
@@ -228,6 +334,17 @@ function renderAssembled({ definition, targetStep, resolvedPrompt, resolvedInput
     lines.push("## Guidance");
     lines.push("");
     lines.push(docs.trim());
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+  }
+
+  if (assembly.notes.length > 0) {
+    lines.push("## Assembly notes");
+    lines.push("");
+    for (const note of assembly.notes) {
+      lines.push(`- ${note}`);
+    }
     lines.push("");
     lines.push("---");
     lines.push("");
@@ -302,6 +419,7 @@ export async function assembleRuneflow(definition, stepId, inputs = {}, runtime 
     const docs = targetStep.docs
       ? (definition.docBlocks?.[targetStep.docs] ?? definition.docs)
       : definition.docs;
+    const assembly = buildAssemblyMetadata(completedSteps);
 
     if (options.format === "json") {
       return {
@@ -311,6 +429,9 @@ export async function assembleRuneflow(definition, stepId, inputs = {}, runtime 
         prompt: typeof resolvedPrompt === "string" ? resolvedPrompt.trim() : resolvedPrompt,
         input: resolvedInput,
         schema: targetStep.schema ?? null,
+        pre_steps: assembly.pre_steps,
+        execution: assembly.stats,
+        notes: assembly.notes,
       };
     }
 
@@ -320,6 +441,7 @@ export async function assembleRuneflow(definition, stepId, inputs = {}, runtime 
       resolvedPrompt,
       resolvedInput,
       docs,
+      assembly,
     });
   } finally {
     await closeRuntimePlugins(environment).catch(() => {});

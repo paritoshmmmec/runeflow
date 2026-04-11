@@ -352,11 +352,21 @@ export async function runCli(argv) {
 
     const result = await runTest(definition, fixture, { runtime, runsDir });
 
+    const failureCount = result.failures.length;
+    const summary = result.pass
+      ? "Fixture passed."
+      : `Fixture failed with ${failureCount} assertion${failureCount === 1 ? "" : "s"}.`;
+
     console.log(JSON.stringify({
       pass: result.pass,
+      summary,
+      failure_count: failureCount,
       failures: result.failures,
       status: result.run?.status ?? null,
       run_id: result.run?.run_id ?? null,
+      tool_calls: result.toolCallsByStep,
+      tool_calls_by_name: result.toolCalls,
+      llm_calls: result.llmCalls,
     }, null, 2));
 
     if (!result.pass) {

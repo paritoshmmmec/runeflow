@@ -371,4 +371,144 @@ test("assembleRuneflow: format json returns structured object", async () => {
   assert.deepEqual(result.schema, { title: "string", body: "string" });
   assert.ok(typeof result.docs === "string");
   assert.ok(result.input.branch === "feat/json-test");
+  assert.deepEqual(result.pre_steps, [
+    { id: "branch", kind: "tool", status: "success" },
+    { id: "diff", kind: "tool", status: "success" },
+  ]);
+  assert.deepEqual(result.execution, {
+    total_pre_steps: 2,
+    llm_pre_steps: 0,
+    human_input_defaults: 0,
+    human_input_placeholders: 0,
+  });
+  assert.deepEqual(result.notes, []);
+});
+
+test("assembleRuneflow: parallel pre-steps include llm children and parallel summary metadata", async () => {
+  const skill = `---
+name: parallel-assemble
+version: 0.1
+inputs:
+  topic: string
+outputs:
+  result: string
+llm:
+  provider: mock
+  router: false
+  model: test
+---
+
+\`\`\`runeflow
+parallel gather {
+  steps: [fetch_topic, summarize_topic]
+}
+
+step fetch_topic type=tool {
+  tool: mock.fetch
+  with: { topic: inputs.topic }
+  out: { topic: string }
+}
+
+step summarize_topic type=llm {
+  prompt: "Summarize {{ inputs.topic }}"
+  schema: { summary: string }
+}
+
+step draft type=llm {
+  prompt: "Use {{ steps.gather.by_step.fetch_topic.topic }} and {{ steps.gather.by_step.summarize_topic.summary }}"
+  input: {
+    topic: steps.gather.by_step.fetch_topic.topic,
+    summary: steps.gather.by_step.summarize_topic.summary
+  }
+  schema: { result: string }
+}
+
+output {
+  result: steps.draft.result
+}
+\`\`\`
+`;
+
+  const definition = parseRuneflow(skill);
+  const runtime = {
+    tools: {
+      "mock.fetch": async ({ topic }) => ({ topic }),
+    },
+    llms: {
+      mock: async ({ step }) => {
+        if (step.id === "summarize_topic") return { summary: "concise summary" };
+        return { result: "done" };
+      },
+    },
+  };
+
+  const result = await assembleRuneflow(
+    definition, "draft", { topic: "runeflow" }, runtime, { format: "json" },
+  );
+
+  assert.equal(result.prompt, "Use runeflow and concise summary");
+  assert.deepEqual(result.pre_steps, [
+    { id: "fetch_topic", kind: "tool", status: "success" },
+    { id: "summarize_topic", kind: "llm", status: "success", provider: "mock" },
+    {
+      id: "gather",
+      kind: "parallel",
+      status: "success",
+      child_ids: ["fetch_topic", "summarize_topic"],
+    },
+  ]);
+  assert.equal(result.execution.llm_pre_steps, 1);
+  assert.equal(result.notes.length, 1);
+});
+
+test("assembleRuneflow: markdown output includes assembly notes for llm and pending human input pre-steps", async () => {
+  const skill = `---
+name: assembly-notes
+version: 0.1
+inputs:
+  topic: string
+outputs:
+  result: string
+llm:
+  provider: mock
+  router: false
+  model: test
+---
+
+\`\`\`runeflow
+step ask type=human_input {
+  prompt: "Optional detail?"
+}
+
+step summarize type=llm {
+  prompt: "Summarize {{ inputs.topic }}"
+  schema: { summary: string }
+}
+
+step draft type=llm {
+  prompt: "Use {{ steps.ask.answer }} and {{ steps.summarize.summary }}"
+  schema: { result: string }
+}
+
+output {
+  result: steps.draft.result
+}
+\`\`\`
+`;
+
+  const definition = parseRuneflow(skill);
+  const runtime = {
+    llms: {
+      mock: async ({ step }) => {
+        if (step.id === "summarize") return { summary: "brief" };
+        return { result: "done" };
+      },
+    },
+  };
+
+  const result = await assembleRuneflow(definition, "draft", { topic: "runeflow" }, runtime);
+
+  assert.ok(result.includes("## Assembly notes"));
+  assert.ok(result.includes("earlier llm step"));
+  assert.ok(result.includes('assembly inserted "<pending>"'));
 });
