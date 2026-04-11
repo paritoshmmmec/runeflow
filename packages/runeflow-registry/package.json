@@ -23,5 +23,10 @@
     "@slack/web-api":      { "optional": true },
     "@notionhq/client":    { "optional": true }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paritoshmmmec/runeflow",
+    "directory": "packages/runeflow-registry"
+  },
   "keywords": ["runeflow", "tools", "registry", "github", "linear", "slack", "notion"]
 }

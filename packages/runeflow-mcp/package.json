@@ -13,5 +13,10 @@
   },
   "peerDependencies": {
     "runeflow": ">=0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paritoshmmmec/runeflow",
+    "directory": "packages/runeflow-mcp"
   }
 }
