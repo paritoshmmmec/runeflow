@@ -1,6 +1,6 @@
 {
   "name": "runeflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
   "types": "index.d.ts",
@@ -49,12 +49,26 @@
     "@composio/core": ">=0.6.0"
   },
   "peerDependenciesMeta": {
-    "@ai-sdk/anthropic": { "optional": true },
-    "@ai-sdk/cerebras": { "optional": true },
-    "@ai-sdk/google": { "optional": true },
-    "@ai-sdk/groq": { "optional": true },
-    "@ai-sdk/mistral": { "optional": true },
-    "@ai-sdk/openai": { "optional": true },
-    "@composio/core": { "optional": true }
+    "@ai-sdk/anthropic": {
+      "optional": true
+    },
+    "@ai-sdk/cerebras": {
+      "optional": true
+    },
+    "@ai-sdk/google": {
+      "optional": true
+    },
+    "@ai-sdk/groq": {
+      "optional": true
+    },
+    "@ai-sdk/mistral": {
+      "optional": true
+    },
+    "@ai-sdk/openai": {
+      "optional": true
+    },
+    "@composio/core": {
+      "optional": true
+    }
   }
 }
