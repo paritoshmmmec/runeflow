@@ -65,7 +65,7 @@ Use the double-brace syntax for referencing step outputs, e.g., {{ steps.id.fiel
 Output ONLY the file content, no conversational filler.
 
 Description: ${description}
-`.trim().replace(/{{/g, "{ {"); // Break the braces so validator ignores the example
+`.trim();
 
 
   // We use the runtime's own LLM execution logic by creating a temporary skill

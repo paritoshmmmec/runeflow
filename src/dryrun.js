@@ -121,15 +121,15 @@ export async function dryrunRuneflow(definition, inputs = {}, runtime = {}, opti
     }
 
     const resolvedWorkflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }, importedBlocks);
-  const steps = resolvedWorkflow.steps;
-  const stepIndex = new Map(steps.map((s, idx) => [s.id, idx]));
-  const completedSteps = [];
-  const plan = [];
-  const handledByParallel = new Set();
-  let i = 0;
+    const steps = resolvedWorkflow.steps;
+    const stepIndex = new Map(steps.map((s, idx) => [s.id, idx]));
+    const completedSteps = [];
+    const plan = [];
+    const handledByParallel = new Set();
+    let i = 0;
 
-  while (i < steps.length) {
-    const step = steps[i];
+    while (i < steps.length) {
+      const step = steps[i];
 
     // Skip steps already handled as children of a parallel block
     if (handledByParallel.has(step.id)) {
