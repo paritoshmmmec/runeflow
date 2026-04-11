@@ -470,3 +470,74 @@ export function createComposioClientPlugin(options: ComposioClientPluginOptions)
 export function createRuntimeEnvironment(runtime?: Runtime, options?: Record<string, unknown>): RuntimeEnvironment;
 export function closeRuntimePlugins(runtime: RuntimeEnvironment): Promise<void>;
 export function collectRuntimeExtensions(runtime?: Runtime, options?: Record<string, unknown>): RuntimeEnvironment;
+
+// ─── Test Runner ──────────────────────────────────────────────────────────────
+
+/** Mock return value for a tool or llm step. Can be an object or a function. */
+export type MockValue<TInput = Record<string, unknown>, TOutput = Record<string, unknown>> =
+  | TOutput
+  | ((input: TInput) => TOutput | Promise<TOutput>);
+
+/**
+ * Fixture object for `runeflow test`.
+ *
+ * - `inputs`: skill input values
+ * - `mocks.tools`: keyed by tool name, return value or factory function
+ * - `mocks.llm`: keyed by step ID, return value or factory function
+ * - `expect`: assertions on status, outputs, and/or per-step outcomes
+ */
+export interface RuneflowFixture {
+  inputs?: Record<string, unknown>;
+  mocks?: {
+    tools?: Record<string, MockValue>;
+    llm?: Record<string, MockValue>;
+  };
+  expect?: {
+    status?: RunStatus;
+    outputs?: Record<string, unknown>;
+    steps?: Record<string, Partial<StepRun>>;
+  };
+}
+
+/** A single assertion failure from a test run. */
+export interface TestFailure {
+  path: string;
+  expected: unknown;
+  actual: unknown;
+  message: string;
+}
+
+/** Result of a `runTest` call. */
+export interface TestResult {
+  /** True if all assertions in `fixture.expect` passed. */
+  pass: boolean;
+  /** List of assertion failures (empty if pass === true). */
+  failures: TestFailure[];
+  /** The underlying `RunResult` (null if the skill threw before completing). */
+  run: RunResult | null;
+  /** Log of tool calls made during the run, keyed by tool name. */
+  toolCalls: Record<string, Record<string, unknown>[]>;
+  /** Log of LLM calls made during the run, keyed by step ID. */
+  llmCalls: Record<string, { step: string; prompt: unknown; input: Record<string, unknown> }[]>;
+}
+
+export interface TestOptions {
+  runsDir?: string;
+  runtime?: Runtime;
+}
+
+/**
+ * Runs a runeflow definition against a fixture, using mocked tools and LLMs.
+ * No real API calls or shell commands are made.
+ */
+export function runTest(
+  definition: RuneflowDefinition,
+  fixture: RuneflowFixture,
+  options?: TestOptions,
+): Promise<TestResult>;
+
+/**
+ * Loads a fixture JSON file from the given path.
+ */
+export function loadFixture(fixturePath: string): Promise<RuneflowFixture>;
+

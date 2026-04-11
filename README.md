@@ -31,8 +31,8 @@ Runeflow is in **active development (v0.4.x)**. It is stable for CLI automation 
 - [The Solution](#-the-solution)
 - [Benchmarks](#-benchmarks)
 - [Quickstart](#-quickstart)
-  - [runeflow init](#step-3--generate-a-skill-with-runeflow-init)
-- [Skill File Shape](#-skill-file-shape)
+  - [runeflow init](#step-3--generate-a-runeflowmd-with-runeflow-init)
+- [Runeflow File Shape](#-runeflow-file-shape)
 - [Step Kinds](#-step-kinds)
 - [Expressions](#-expressions)
 - [Built-in Tools](#-built-in-tools)
@@ -53,7 +53,7 @@ Runeflow is in **active development (v0.4.x)**. It is stable for CLI automation 
 
 ## 🤔 The Problem
 
-Most AI skills are just prompt text. The model informally decides what to do, which tools to call, and in what order. That breaks down fast:
+Most AI workflows are just prompt text. The model informally decides what to do, which tools to call, and in what order. That breaks down fast:
 
 - control flow is implicit and unreliable
 - tool calls and retries are ad hoc
@@ -76,7 +76,7 @@ Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 | 3p-updates | 825 | 508 | **-38%** |
 | open-pr | 219 | 236 | neutral |
 
-> On orchestration-heavy tasks, raw skills fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
+> On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
 
 > 🤙 The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.runeflow.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
 
@@ -112,9 +112,9 @@ Add your key to a `.env` file:
 echo "CEREBRAS_API_KEY=your-key-here" > .env
 ```
 
-**Step 3 — Generate a skill with `runeflow init`**
+**Step 3 — Generate a `.runeflow.md` with `runeflow init`**
 
-Run `runeflow init` inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.runeflow.md` files — and generates a real, immediately-runnable skill tailored to what it finds.
+Run `runeflow init` inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.runeflow.md` files — and generates a real, immediately-runnable `.runeflow.md` tailored to what it finds.
 
 ```bash
 runeflow init
@@ -134,10 +134,10 @@ runeflow init [--name <slug>] [--context <hint>] [--template <id>]
 |---|---|
 | `--context <hint>` | Extra hint for template selection, e.g. `"deploy to AWS"` |
 | `--template <id>` | Force a specific template (bypasses heuristics) |
-| `--no-local-llm` | Skip local model download; write skill with a placeholder provider |
+| `--no-local-llm` | Skip local model download; write `.runeflow.md` with a placeholder provider |
 | `--no-polish` | Skip LLM polish even when a cloud key is present |
-| `--force` | Overwrite existing skill and `runtime.js` files |
-| `--name <slug>` | Override the generated skill filename |
+| `--force` | Overwrite existing `.runeflow.md` and `runtime.js` files |
+| `--name <slug>` | Override the generated filename |
 
 **Built-in templates:**
 
@@ -152,13 +152,13 @@ runeflow init [--name <slug>] [--context <hint>] [--template <id>]
 | `linear-issue` | Linear SDK detected |
 | `generic-llm-task` | Default fallback |
 
-**Conversion mode:** if your project contains existing Claude-style Markdown skill files (files with `<system>` blocks, `## Tools` sections, or `Input:`/`Output:` annotations), `runeflow init` detects them and converts them to `.runeflow.md` format instead of generating from a template.
+**Conversion mode:** if your project contains existing Claude-style Markdown files (files with `<system>` blocks, `## Tools` sections, or `Input:`/`Output:` annotations), `runeflow init` detects them and converts them to `.runeflow.md` format instead of generating from a template.
 
 ---
 
-**Or write a skill file by hand:**
+**Or write a `.runeflow.md` by hand:**
 
-A skill is one Markdown file. The frontmatter declares inputs/outputs, the prose is guidance for the LLM, and the `runeflow` block is the executable workflow.
+A `.runeflow.md` is one Markdown file. The frontmatter declares inputs/outputs, the prose is guidance for the LLM, and the `runeflow` block is the executable workflow.
 
 Create `draft-pr.runeflow.md` inside any git repo:
 
@@ -260,11 +260,11 @@ runeflow tools inspect git.diff_summary
 
 ---
 
-## 📄 Skill File Shape
+## 📄 Runeflow File Shape
 
-A skill is one `.runeflow.md` file — YAML frontmatter, Markdown guidance, and a fenced `runeflow` block.
+A `.runeflow.md` file is a standard Markdown document — YAML frontmatter, human-readable guidance, and a fenced `runeflow` block that the runtime executes. The `.runeflow.md` suffix is a convention, not a requirement. Any `.md` file containing a `runeflow` block is valid.
 
-````md
+```md
 ---
 name: prepare-pr
 description: Prepare a pull request draft.
@@ -477,9 +477,9 @@ runeflow tools list [--runtime ./runtime.js]
 runeflow tools inspect <tool-name> [--runtime ./runtime.js]
 ```
 
-`init` inspects the current directory and generates a ready-to-run `.runeflow.md` skill. It detects installed SDKs, git history, CI config, and existing skills to pick the best template. Pass `--context` to give it a hint, `--template` to force a specific one, or `--no-local-llm` to skip the local model download when no cloud key is present.
+`init` inspects the current directory and generates a ready-to-run `.runeflow.md`. It detects installed SDKs, git history, CI config, and existing `.runeflow.md` files to pick the best template. Pass `--context` to give it a hint, `--template` to force a specific one, or `--no-local-llm` to skip the local model download when no cloud key is present.
 
-`dryrun` validates the skill, then walks every step resolving all bindings with the provided inputs — but executes nothing. No tool calls, no LLM calls, no shell commands. Shows exactly what each step *would* do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders (e.g. `"<string>"`, `0`, `false`) derived from the output schema.
+`dryrun` validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. No tool calls, no LLM calls, no shell commands. Shows exactly what each step *would* do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders (e.g. `"<string>"`, `0`, `false`) derived from the output schema.
 
 ```bash
 runeflow dryrun ./draft-pr.runeflow.md --input '{"base_branch":"main"}'
@@ -498,9 +498,9 @@ runeflow dryrun ./draft-pr.runeflow.md --input '{"base_branch":"main"}'
 
 `resume` reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
 
-`watch` runs a skill on a cron schedule, on file changes, or both. It reuses the normal `run` path, so artifacts, prompts, validation, and runtime loading behave the same way.
+`watch` runs a `.runeflow.md` on a cron schedule, on file changes, or both. It reuses the normal `run` path, so artifacts, prompts, validation, and runtime loading behave the same way.
 
-`assemble` runs all tool/transform steps before a target `llm` step, resolves the prompt with real values, and writes a clean Markdown context file for an agent (Claude Code, Codex, Cursor) to load instead of the raw skill.
+`assemble` runs all tool/transform steps before a target `llm` step, resolves the prompt with real values, and writes a clean Markdown context file for an agent (Claude Code, Codex, Cursor) to load instead of the raw `.runeflow.md`.
 
 ---
 
@@ -650,10 +650,10 @@ The default Composio client plugin expects `COMPOSIO_API_KEY` and `@composio/cor
 
 ## 🔌 Zero-Config MCP & Composio Wiring
 
-There are two ways to wire external tools into a skill:
+There are two ways to wire external tools into a `.runeflow.md`:
 
-1. **Frontmatter blocks** — declare `mcp_servers` or `composio` directly in the skill file. No separate runtime file needed. Good for self-contained skills.
-2. **Runtime plugins** — use `createMcpClientPlugin` / `createComposioClientPlugin` in a `runtime.js` file. Good for sharing tool config across multiple skills. See [Writing a Runtime](#️-writing-a-runtime).
+1. **Frontmatter blocks** — declare `mcp_servers` or `composio` directly in the file. No separate runtime file needed. Good for self-contained workflows.
+2. **Runtime plugins** — use `createMcpClientPlugin` / `createComposioClientPlugin` in a `runtime.js` file. Good for sharing tool config across multiple `.runeflow.md` files. See [Writing a Runtime](#️-writing-a-runtime).
 
 ### `mcp_servers` (frontmatter option)
 
@@ -815,9 +815,9 @@ step push type=tool cache=false {
 
 ## 🔒 Trust Model
 
-- Skill files define `transform` expressions — treat them as trusted code in the host process
+- `.runeflow.md` files define `transform` expressions — treat them as trusted code in the host process
 - `transform` runs via `new Function`. Set `RUNEFLOW_DISABLE_TRANSFORM=1` to block transform steps
-- `cli` steps run shell commands via `sh -c` (or `cmd /c` on Windows) — treat skill files as executable code
+- `cli` steps run shell commands via `sh -c` (or `cmd /c` on Windows) — treat `.runeflow.md` files as executable code
 - `--runtime ./path.js` loads that module via Node `import()` — only load trusted runtimes
 - `mcp_servers` and `composio` frontmatter blocks support `${VAR}` env var interpolation. By default, only a curated allowlist of known integration keys (provider API keys, Composio IDs, etc.) can be expanded. Unrecognized variables resolve to an empty string with a warning on stderr. Extend the allowlist or disable it:
 
@@ -825,7 +825,7 @@ step push type=tool cache=false {
 # Add extra allowed variables (comma-separated)
 export RUNEFLOW_ENV_ALLOWLIST=MY_CUSTOM_TOKEN,DEPLOY_KEY
 
-# Disable the allowlist entirely (trust the skill file fully)
+# Disable the allowlist entirely (trust the .runeflow.md file fully)
 export RUNEFLOW_ENV_ALLOWLIST=*
 ```
 
@@ -839,7 +839,7 @@ export RUNEFLOW_ENV_ALLOWLIST=*
 | v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps, MCP client plugins (stdio + HTTP), Composio client plugin, env var allowlist |
 | v0.3 | ✅ shipped | `runeflow-mcp` (MCP server), `runeflow-registry` (GitHub, Linear, Slack, Notion), `dryrun`, `mcp_servers` frontmatter, `composio` frontmatter |
 | v0.4 | ✅ shipped | smarter `runeflow init` (repo inspection, heuristics, conversion), local LLM fallback, **TypeScript definitions**, **Streaming CLI output** |
-| v0.5 | 📅 in progress | `runeflow test` (behavioral test harness), `runeflow build` (LLM → skill compiler), cross-file skill composition / imports |
+| v0.5 | 📅 in progress | `runeflow test` (behavioral test harness), `runeflow build` (LLM → `.runeflow.md` compiler), cross-file composition / imports |
 | v0.6 | 📅 planned | Remote execution (server mode), Web Dashboard for run artifact inspection |
 
 ---
@@ -876,7 +876,7 @@ Best for: standalone automation scripts, CI/CD pipelines, backend services, sche
 
 ### Mode 2 — Assemble (Preprocessor for Agents) ✅
 
-You run `runeflow assemble` before invoking an agent. Runeflow executes all the deterministic setup steps (git, file reads, API calls), resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file instead of the raw skill — it sees only what it needs for one step.
+You run `runeflow assemble` before invoking an agent. Runeflow executes all the deterministic setup steps (git, file reads, API calls), resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file instead of the raw `.runeflow.md` — it sees only what it needs for one step.
 
 ```bash
 runeflow assemble ./draft-pr.runeflow.md \
@@ -935,7 +935,7 @@ Add to your MCP config (`.mcp.json` in your project root for Claude Code):
 Then in Claude Code or Cursor:
 > "Use runeflow_run to run ./draft-pr.runeflow.md with inputs `{"base_branch": "main"}`"
 
-The agent never sees the skill internals. It just gets back `{ status, run_id, outputs }`.
+The agent never sees the `.runeflow.md` internals. It just gets back `{ status, run_id, outputs }`.
 
 Best for: Claude Code with MCP configured, Cursor agents, any system that supports the Model Context Protocol.
 

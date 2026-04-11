@@ -14,11 +14,15 @@ The runtime owns execution semantics. LLM handlers may see projected docs and re
 
 The goal is to keep the runtime small and easy to evolve during experimentation. Prefer simple, explicit designs over flexible but heavy abstractions.
 
+## File Format
+
+Runeflow files are standard Markdown documents. The `.runeflow.md` suffix is a convention — any `.md` file containing a fenced `runeflow` block is a valid Runeflow file. The runtime finds and executes the block regardless of filename. This means existing docs, runbooks, or READMEs can become executable without renaming.
+
+The `.runeflow.md` convention exists to signal intent: this file is workflow-first. It may be relaxed in a future version to support plain `.md` as the primary extension.
+
 ## Current Runtime Model
 
 The supported workflow model is intentionally narrow:
-
-- ordered execution
 - named **`block`** templates (`block id type=… { … }`) and **`step … type=block { block: id }`** (same-file resolution in `src/blocks.js`)
 - `tool` steps
 - `llm` steps with schema validation

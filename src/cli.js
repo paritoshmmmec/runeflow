@@ -6,6 +6,7 @@ import chokidar from "chokidar";
 import cron from "node-cron";
 import { assembleRuneflow } from "./assembler.js";
 import { dryrunRuneflow } from "./dryrun.js";
+import { runTest, loadFixture } from "./test-runner.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { runInit } from "./init.js";
 import { parseRuneflow } from "./parser.js";
@@ -13,6 +14,7 @@ import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins
 import { runRuneflow } from "./runtime.js";
 import { loadToolRegistry } from "./tool-registry.js";
 import { validateRuneflow } from "./validator.js";
+import { buildRuneflow } from "./builder.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
 const LEGACY_RUNS_DIR = ".skill-runs";
@@ -201,6 +203,7 @@ export async function runCli(argv) {
                [--no-local-llm] [--no-polish] [--force]
   runeflow validate <file> [--runtime ./runtime.js]
   runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force]
+  runeflow test <file> --fixture <fixture.json> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
   runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
   runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
@@ -253,6 +256,52 @@ export async function runCli(argv) {
     console.log(JSON.stringify(run, null, 2));
     if (run.status !== "success") {
       process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "test") {
+    const target = positional[0];
+    if (!target) throw new Error("Usage: runeflow test <file> --fixture <fixture.json>");
+    const fixturePath = options.fixture;
+    if (!fixturePath) throw new Error("--fixture <path> is required for runeflow test");
+
+    const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
+    const definition = parseRuneflow(source, { sourcePath: target });
+    const runtime = await loadRuntime(options.runtime);
+    const fixture = await loadFixture(fixturePath);
+    const runsDir = options["runs-dir"] ? path.resolve(process.cwd(), options["runs-dir"]) : undefined;
+
+    const result = await runTest(definition, fixture, { runtime, runsDir });
+
+    console.log(JSON.stringify({
+      pass: result.pass,
+      failures: result.failures,
+      status: result.run?.status ?? null,
+      run_id: result.run?.run_id ?? null,
+    }, null, 2));
+
+    if (!result.pass) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "build") {
+    const description = positional[0];
+    if (!description) throw new Error("Usage: runeflow build <description> [--provider <p>] [--model <m>] [--out <file>]");
+
+    const provider = options.provider;
+    const model = options.model;
+    const runtime = await loadRuntime(options.runtime);
+
+    const output = await buildRuneflow(description, { provider, model, runtime });
+
+    if (options.out) {
+      await fs.writeFile(path.resolve(process.cwd(), options.out), output, "utf8");
+      console.log(`Written to ${options.out}`);
+    } else {
+      console.log(output);
     }
     return;
   }

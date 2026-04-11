@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { parseRuneflow } from "./parser.js";
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { collectExpressionPaths, collectTemplatePaths, hasTemplateExpressions, looksLikeExpression, parseExpression, STEP_STATE_FIELDS } from "./expression.js";
 import { shapeHasPath } from "./schema.js";
@@ -5,6 +8,57 @@ import { getToolOutputSchema, loadToolRegistry } from "./tool-registry.js";
 import { isPlainObject } from "./utils.js";
 
 const STEP_RUNTIME_FIELDS = STEP_STATE_FIELDS;
+
+export function loadImportedBlocks(imports, options, seen = new Set(), issues = []) {
+  const importedBlocks = new Map();
+  if (!imports || imports.length === 0) return importedBlocks;
+
+  const baseDir = options.sourcePath ? path.dirname(options.sourcePath) : process.cwd();
+
+  for (const importDecl of imports) {
+    if (importDecl.kind !== "blocks") continue;
+    
+    const absolutePath = path.resolve(baseDir, importDecl.path);
+    if (seen.has(absolutePath)) continue;
+    seen.add(absolutePath);
+
+    if (!fs.existsSync(absolutePath)) {
+      issues.push(`Imported file not found: '${importDecl.path}'`);
+      continue;
+    }
+
+    let source;
+    try {
+      source = fs.readFileSync(absolutePath, "utf8");
+    } catch (err) {
+      issues.push(`Failed to read imported file '${importDecl.path}': ${err.message}`);
+      continue;
+    }
+
+    let parsed;
+    try {
+      parsed = parseRuneflow(source, { sourcePath: absolutePath });
+    } catch (err) {
+      issues.push(`Failed to parse imported file '${importDecl.path}': ${err.message}`);
+      continue;
+    }
+    
+    const nestedBlocks = loadImportedBlocks(parsed.workflow.imports ?? [], { sourcePath: absolutePath }, seen, issues);
+    for (const [id, block] of nestedBlocks) {
+      if (!importedBlocks.has(id)) {
+        importedBlocks.set(id, block);
+      }
+    }
+
+    for (const block of parsed.workflow.blocks ?? []) {
+      if (!importedBlocks.has(block.id)) {
+        importedBlocks.set(block.id, block);
+      }
+    }
+  }
+
+  return importedBlocks;
+}
 
 function collectReferences(value, issues, location) {
   const references = [];
@@ -186,7 +240,17 @@ function validateReferencePath(pathExpression, availableInputs, availableConsts,
 export function validateSkill(definition, options = {}) {
   const issues = [];
   const warnings = [];
-  const workflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} });
+  
+  const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], options, new Set(), issues);
+
+  let workflow;
+  try {
+    workflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }, importedBlocks);
+  } catch (error) {
+    workflow = definition.workflow ?? { steps: [], output: {} };
+    issues.push(error.message);
+  }
+
   const { metadata } = definition;
   const consts = definition.consts ?? {};
   const seenStepIds = new Set();
@@ -277,6 +341,7 @@ export function validateSkill(definition, options = {}) {
       && step.kind !== "transform"
       && step.kind !== "cli"
       && step.kind !== "human_input"
+      && step.kind !== "fail"
     ) {
       issues.push(`step '${step.id}' has unsupported kind '${step.kind}'`);
       continue;
@@ -405,6 +470,18 @@ export function validateSkill(definition, options = {}) {
 
     if (step.retry !== undefined && (!Number.isInteger(step.retry) || step.retry < 0)) {
       issues.push(`step '${step.id}' retry must be a non-negative integer`);
+    }
+
+    if (step.retry_delay !== undefined && (typeof step.retry_delay !== "number" || step.retry_delay < 0)) {
+      issues.push(`step '${step.id}' retry_delay must be a non-negative number (milliseconds)`);
+    }
+
+    if (step.retry_backoff !== undefined && !["linear", "exponential"].includes(step.retry_backoff)) {
+      issues.push(`step '${step.id}' retry_backoff must be 'linear' or 'exponential'`);
+    }
+
+    if (step.retry_delay !== undefined && step.retry === undefined) {
+      issues.push(`step '${step.id}' retry_delay requires retry to be set`);
     }
 
     if (step.skip_if !== undefined && typeof step.skip_if !== "string") {

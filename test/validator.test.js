@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { parseRuneflow } from "../src/parser.js";
 import { validateRuneflow } from "../src/validator.js";
 
@@ -736,4 +739,81 @@ output {
   const result = validateRuneflow(parsed);
   assert.equal(result.valid, false);
   assert.ok(result.issues.some((i) => i.includes("not declared in mcp_servers")));
+});
+
+test("validateRuneflow loads and merges cross-file imported blocks", async () => {
+  const tmpdir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-imports-"));
+  const importedFile = path.join(tmpdir, "shared.runeflow.md");
+  const mainFile = path.join(tmpdir, "main.runeflow.md");
+
+  await fs.writeFile(importedFile, `---
+name: shared
+description: Shared blocks
+version: 0.1
+inputs: {}
+outputs: {}
+---
+\`\`\`runeflow
+block hello_template type=tool {
+  tool: mock.hello
+  out: { msg: string }
+}
+\`\`\`
+`);
+
+  await fs.writeFile(mainFile, `---
+name: main
+description: Main skill
+version: 0.1
+inputs: {}
+outputs:
+  greeting: string
+---
+\`\`\`runeflow
+import blocks from "./shared.runeflow.md"
+
+step greet type=block {
+  block: hello_template
+}
+
+output {
+  greeting: steps.greet.msg
+}
+\`\`\`
+`);
+
+  const source = await fs.readFile(mainFile, "utf8");
+  const parsed = parseRuneflow(source, { sourcePath: mainFile });
+  const validation = validateRuneflow(parsed, { sourcePath: mainFile });
+
+  assert.equal(validation.valid, true, `Validation failed: ${validation.issues.join(", ")}`);
+  assert.deepEqual(validation.issues, []);
+});
+
+test("validateRuneflow rejects invalid import paths", async () => {
+  const parsed = parseRuneflow(`---
+name: invalid-import
+description: Invalid import path
+version: 0.1
+inputs: {}
+outputs:
+  greeting: string
+---
+\`\`\`runeflow
+import blocks from "./does-not-exist.runeflow.md"
+
+step greet type=block {
+  block: hello_template
+}
+
+output {
+  greeting: steps.greet.msg
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed, { sourcePath: "/mock/main.runeflow.md" });
+  assert.equal(validation.valid, false);
+  assert.ok(validation.issues.some((i) => i.includes("Imported file not found")));
+  assert.ok(validation.issues.some((i) => i.includes("Unknown block 'hello_template'")));
 });

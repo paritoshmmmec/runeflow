@@ -430,7 +430,7 @@ export async function createMcpClientPlugin({
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema ?? (tool.structuredOutputSchema ?? undefined),
     })),
-    callTool: async ({ server: discoveredServer, name, input }) => session.useClient(
+    callTool: async ({ name, input }) => session.useClient(
       async (client) => client.callTool({
         name,
         arguments: input,

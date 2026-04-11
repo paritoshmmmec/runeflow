@@ -5,7 +5,7 @@
  * and input with real values, then renders a clean Markdown context file.
  *
  * The output is designed to be loaded by an agent (Claude Code, Codex, Cursor)
- * instead of the raw skill file. The agent sees only what it needs for one step:
+ * instead of the raw .runeflow.md. The agent sees only what it needs for one step:
  * the relevant docs, the resolved prompt, the resolved input, and the output schema.
  *
  * Zero changes to runtime.js — this is purely additive.
@@ -13,7 +13,7 @@
 import { RuntimeError } from "./errors.js";
 import { evaluateExpression, resolveBindings } from "./expression.js";
 import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
-import { deepClone } from "./utils.js";
+import { deepClone, evalTransformExpr } from "./utils.js";
 
 
 function buildStepState(completedSteps) {
@@ -58,8 +58,7 @@ async function executePreSteps(definition, targetStepId, inputs, tools) {
 
     } else if (step.kind === "transform") {
       const resolvedInput = resolveBindings(step.input, state);
-      // eslint-disable-next-line no-new-func
-      const outputs = new Function("input", `return (${step.expr})`)(resolvedInput);
+      const outputs = evalTransformExpr(step.expr, resolvedInput);
       completedSteps.push({ id: step.id, kind: step.kind, outputs: deepClone(outputs) });
 
     } else if (step.kind === "branch") {

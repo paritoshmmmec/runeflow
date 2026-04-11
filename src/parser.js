@@ -265,12 +265,14 @@ function parseOutputBlock(body) {
 function parseWorkflow(workflowSource) {
   if (!workflowSource.trim()) {
     return {
+      imports: [],
       steps: [],
       output: {},
     };
   }
 
   const source = normalizeNewlines(workflowSource);
+  const imports = [];
   const steps = [];
   const blocks = [];
   let output = {};
@@ -283,6 +285,19 @@ function parseWorkflow(workflowSource) {
 
     if (index >= source.length) {
       break;
+    }
+
+    if (source.startsWith("import ", index)) {
+      const lineEnd = source.indexOf("\n", index);
+      const end = lineEnd === -1 ? source.length : lineEnd;
+      const line = source.slice(index, end).trim();
+      const match = line.match(/^import\s+blocks\s+from\s+["'](.+)["']$/);
+      if (!match) {
+        throw new SkillSyntaxError(`Invalid import declaration: '${line}'`);
+      }
+      imports.push({ kind: "blocks", path: match[1] });
+      index = end;
+      continue;
     }
 
     const braceIndex = source.indexOf("{", index);
@@ -312,7 +327,7 @@ function parseWorkflow(workflowSource) {
     index = blockEnd + 1;
   }
 
-  return { steps, output, blocks };
+  return { imports, steps, output, blocks };
 }
 
 function extractDocBlocks(markdownBody) {
@@ -328,7 +343,13 @@ export function parseSkill(source, options = {}) {
   const { frontmatter, remainder } = extractFrontmatter(source);
   const { docs: rawDocs, workflowSource } = extractRuneflowBlock(remainder);
   const { docBlocks, cleanedBody } = extractDocBlocks(rawDocs);
-  const workflow = resolveWorkflowBlocks(parseWorkflow(workflowSource));
+  const rawWorkflow = parseWorkflow(workflowSource);
+  // Only resolve block references eagerly when there are no cross-file imports.
+  // When imports are present, the validator handles resolution after loading the
+  // imported files.
+  const workflow = rawWorkflow.imports?.length > 0
+    ? rawWorkflow
+    : resolveWorkflowBlocks(rawWorkflow);
 
   return {
     sourcePath: options.sourcePath ?? null,

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 
 export function normalizeNewlines(value) {
   return value.replace(/\r\n/g, "\n");
@@ -43,6 +44,7 @@ export function serializeError(error) {
       name: error.name,
       message: error.message,
       stack: error.stack ?? null,
+      ...(error.data !== undefined ? { data: error.data } : {}),
     };
   }
 
@@ -72,7 +74,7 @@ export function getByPath(value, segments) {
  *
  * Only these variables (plus any added via RUNEFLOW_ENV_ALLOWLIST) are
  * expanded when processing mcp_servers / composio configs. This prevents
- * a malicious skill file from exfiltrating sensitive env vars through
+ * a malicious .runeflow.md file from exfiltrating sensitive env vars through
  * URLs, headers, or arguments.
  *
  * Extend at runtime:  RUNEFLOW_ENV_ALLOWLIST=MY_VAR,OTHER_VAR
@@ -178,4 +180,14 @@ export function deepExpandEnvVars(value) {
   }
 
   return walk(value);
+}
+
+/**
+ * Evaluate a transform expression in a restricted vm context.
+ * Uses Node's built-in `vm` module to prevent accidental access to globals
+ * like `process`, `require`, and `fs`. Not a true security sandbox — treat
+ * .runeflow.md files as trusted code — but prevents unintentional side effects.
+ */
+export function evalTransformExpr(expr, input) {
+  return runInNewContext(`(${expr})`, { input });
 }

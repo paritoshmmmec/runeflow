@@ -16,4 +16,5 @@ export {
   createRuntimeEnvironment,
 } from "./runtime-plugins.js";
 export { runRuneflow, runSkill } from "./runtime.js";
+export { runTest, loadFixture } from "./test-runner.js";
 export { validateRuneflow, validateSkill } from "./validator.js";
