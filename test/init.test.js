@@ -201,11 +201,12 @@ test("--no-local-llm writes runtime.js with placeholder provider", async () => {
       silent: true,
     });
 
+    // With --no-local-llm and no cloud key, provider should be "placeholder"
+    // runtime.js is no longer written for placeholder/cloud providers
     const runtimePath = path.join(dir, "runtime.js");
     const runtimeExists = await fs.access(runtimePath).then(() => true).catch(() => false);
-    assert.ok(runtimeExists, "runtime.js should be written");
+    assert.ok(!runtimeExists, "runtime.js should not be written for placeholder provider");
 
-    // With --no-local-llm and no cloud key, provider should be "placeholder"
     // The generated skill should still be valid
     const entries = await fs.readdir(dir);
     const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));

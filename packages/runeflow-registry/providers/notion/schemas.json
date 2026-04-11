@@ -1,0 +1,98 @@
+[
+  {
+    "name": "notion.create_page",
+    "description": "Create a Notion page in a database or as a child of another page.",
+    "tags": [
+      "notion",
+      "pages"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "parent_id": {
+          "type": "string",
+          "description": "Database ID or parent page ID."
+        },
+        "parent_type": {
+          "type": "string",
+          "description": "database or page."
+        },
+        "title": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string",
+          "description": "Plain text content for the page body."
+        }
+      },
+      "required": [
+        "parent_id",
+        "parent_type",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "notion.query_database",
+    "description": "Query a Notion database with optional filters.",
+    "tags": [
+      "notion",
+      "database"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "database_id": {
+          "type": "string"
+        },
+        "filter": {
+          "type": "object",
+          "description": "Notion filter object."
+        },
+        "limit": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "database_id"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "results",
+        "has_more"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

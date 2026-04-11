@@ -89,10 +89,50 @@ function resolveProvider(options) {
 async function polishSkill(content, { provider, model, log }) {
   log(`✨ Polishing with ${provider}...`);
 
-  // polish via AI SDK would go here — requires peer dep (@ai-sdk/<provider>)
-  // Skipping actual LLM call to avoid mandatory peer dependency.
-  // The property tests mock this function directly.
-  return content;
+  try {
+    const { generateObject } = await import("ai");
+    const { z } = await import("zod");
+
+    // Lazy-load the provider factory
+    const FACTORIES = {
+      cerebras:  async (key) => { const { createCerebras }  = await import("@ai-sdk/cerebras");  return createCerebras({ apiKey: key })(model); },
+      openai:    async (key) => { const { createOpenAI }    = await import("@ai-sdk/openai");    return createOpenAI({ apiKey: key })(model); },
+      anthropic: async (key) => { const { createAnthropic } = await import("@ai-sdk/anthropic"); return createAnthropic({ apiKey: key })(model); },
+      groq:      async (key) => { const { createGroq }      = await import("@ai-sdk/groq");      return createGroq({ apiKey: key })(model); },
+      mistral:   async (key) => { const { createMistral }   = await import("@ai-sdk/mistral");   return createMistral({ apiKey: key })(model); },
+      google:    async (key) => { const { createGoogleGenerativeAI } = await import("@ai-sdk/google"); return createGoogleGenerativeAI({ apiKey: key })(model); },
+    };
+
+    const factory = FACTORIES[provider];
+    if (!factory) return content;
+
+    const envKeyMap = {
+      cerebras: "CEREBRAS_API_KEY", openai: "OPENAI_API_KEY", anthropic: "ANTHROPIC_API_KEY",
+      groq: "GROQ_API_KEY", mistral: "MISTRAL_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY",
+    };
+    const apiKey = process.env[envKeyMap[provider]];
+    if (!apiKey) return content;
+
+    const llmModel = await factory(apiKey);
+
+    const { object } = await generateObject({
+      model: llmModel,
+      schema: z.object({ content: z.string() }),
+      prompt: `You are a Runeflow skill author. Improve the following .runeflow.md file:
+- Make the operator guidance (Markdown prose) more specific and useful
+- Improve the LLM step prompt to be more precise
+- Keep all frontmatter, step structure, and output schema exactly as-is
+- Return only the improved file content, no explanation
+
+\`\`\`
+${content}
+\`\`\``,
+    });
+
+    return object.content ?? content;
+  } catch {
+    return content;
+  }
 }
 
 async function tryPolish(content, { provider, model, isCloud, noPolish, log }) {
@@ -379,18 +419,19 @@ async function runGenerationMode(signals, options, { provider, model, isCloud, i
   await fs.writeFile(skillFile, content, "utf8");
   log(`✅ Created ${skillFile}`);
 
-  // Write runtime.js — use local handler only when the local model is actually in use
+  // Only write runtime.js for the local provider — cloud providers work without it
   const runtimeExists = await fileExists(runtimeFile);
-  if (!runtimeExists || force) {
-    const runtimeContent = provider === "local" ? buildLocalRuntime() : buildPlaceholderRuntime();
+  if (provider === "local" && (!runtimeExists || force)) {
+    const runtimeContent = buildLocalRuntime();
     await fs.writeFile(runtimeFile, runtimeContent, "utf8");
     log(`✅ Created ${runtimeFile}`);
   }
 
   // Print ready-to-run command
-  log(`\nruneflow run ./${path.basename(skillFile)} --input '{}' --runtime ./runtime.js`);
+  const runtimeFlag = provider === "local" ? " --runtime ./runtime.js" : "";
+  log(`\nruneflow run ./${path.basename(skillFile)} --input '{}'${runtimeFlag}`);
 
-  return [skillFile, ...(!runtimeExists || force ? [runtimeFile] : [])];
+  return [skillFile, ...(provider === "local" && (!runtimeExists || force) ? [runtimeFile] : [])];
 }
 
 // ---------------------------------------------------------------------------

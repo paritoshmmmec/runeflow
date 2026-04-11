@@ -14,11 +14,15 @@ The runtime owns execution semantics. LLM handlers may see projected docs and re
 
 The goal is to keep the runtime small and easy to evolve during experimentation. Prefer simple, explicit designs over flexible but heavy abstractions.
 
+## File Format
+
+Runeflow files are standard Markdown documents. The `.runeflow.md` suffix is a convention — any `.md` file containing a fenced `runeflow` block is a valid Runeflow file. The runtime finds and executes the block regardless of filename. This means existing docs, runbooks, or READMEs can become executable without renaming.
+
+The `.runeflow.md` convention exists to signal intent: this file is workflow-first. It may be relaxed in a future version to support plain `.md` as the primary extension.
+
 ## Current Runtime Model
 
 The supported workflow model is intentionally narrow:
-
-- ordered execution
 - named **`block`** templates (`block id type=… { … }`) and **`step … type=block { block: id }`** (same-file resolution in `src/blocks.js`)
 - `tool` steps
 - `llm` steps with schema validation
@@ -84,6 +88,17 @@ When adding or updating examples:
 - keep examples small but realistic
 - show both deterministic tool usage and typed LLM outputs when possible
 - include result passing when it helps explain the model
+
+## Skill Discovery Convention
+
+Project-level workflows live in `.runeflow/skills/`. Any `.runeflow.md` file in that directory is discoverable via `runeflow skills list` and runnable via `runeflow skills run <name>`.
+
+When adding new project-level workflows, place them in `.runeflow/skills/` so agents can find and invoke them without being told the full path. The `AGENTS.md` file in a project should include an entry like:
+
+```
+## Runeflow Skills
+Skills are in `.runeflow/skills/`. Run `runeflow skills list` to see available workflows.
+```
 
 When updating docs:
 

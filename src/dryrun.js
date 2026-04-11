@@ -1,7 +1,7 @@
 /**
  * runeflow dryrun
  *
- * Walks a skill definition step-by-step, resolving all bindings and
+ * Walks a .runeflow.md step-by-step, resolving all bindings and
  * expressions with the provided inputs, but executes nothing. No tool
  * calls, no LLM calls, no shell commands, no artifact writes.
  *
@@ -15,10 +15,10 @@
 
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { evaluateExpression, resolveBindings } from "./expression.js";
-import { validateSkill } from "./validator.js";
+import { validateSkill, loadImportedBlocks } from "./validator.js";
 import { loadToolRegistry, getToolOutputSchema } from "./tool-registry.js";
 import { createRuntimeEnvironment, closeRuntimePlugins } from "./runtime-plugins.js";
-import { deepClone } from "./utils.js";
+import { deepClone, evalTransformExpr } from "./utils.js";
 
 // ─── Schema-based placeholder generation ──────────────────────────────────────
 
@@ -98,29 +98,38 @@ function tryResolve(fn) {
  * @returns {Promise<object>}  - { valid, validation, steps[], output }
  */
 export async function dryrunRuneflow(definition, inputs = {}, runtime = {}, options = {}) {
-  const environment = createRuntimeEnvironment(runtime, options);
+  // Fall back to definition.sourcePath so relative imports resolve correctly.
+  const effectiveOptions = options.sourcePath
+    ? options
+    : { ...options, sourcePath: definition.sourcePath ?? undefined };
+
+  const environment = createRuntimeEnvironment(runtime, effectiveOptions);
   const toolRegistry = loadToolRegistry({
     runtimeToolRegistry: environment.toolRegistry,
-    toolRegistry: options.toolRegistry,
+    toolRegistry: effectiveOptions.toolRegistry,
   });
 
   try {
-    const validation = validateSkill(definition, { toolRegistry });
+    const issues = [];
+    const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], effectiveOptions, new Set(), issues);
+    
+    // We pass importedBlocks to validator so it uses the same cached/resolved blocks
+    const validation = validateSkill(definition, { toolRegistry, ...effectiveOptions });
 
-    if (!validation.valid) {
-      return { valid: false, validation, steps: [], output: null };
+    if (!validation.valid || issues.length > 0) {
+      return { valid: false, validation: { valid: false, issues: [...validation.issues, ...issues], warnings: validation.warnings }, steps: [], output: null };
     }
 
-    const resolvedWorkflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} });
-  const steps = resolvedWorkflow.steps;
-  const stepIndex = new Map(steps.map((s, idx) => [s.id, idx]));
-  const completedSteps = [];
-  const plan = [];
-  const handledByParallel = new Set();
-  let i = 0;
+    const resolvedWorkflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }, importedBlocks);
+    const steps = resolvedWorkflow.steps;
+    const stepIndex = new Map(steps.map((s, idx) => [s.id, idx]));
+    const completedSteps = [];
+    const plan = [];
+    const handledByParallel = new Set();
+    let i = 0;
 
-  while (i < steps.length) {
-    const step = steps[i];
+    while (i < steps.length) {
+      const step = steps[i];
 
     // Skip steps already handled as children of a parallel block
     if (handledByParallel.has(step.id)) {
@@ -230,7 +239,7 @@ export async function dryrunRuneflow(definition, inputs = {}, runtime = {}, opti
       if (resolvedInput.value !== null && !resolvedInput.error) {
         try {
           // eslint-disable-next-line no-new-func
-          outputs = new Function("input", `return (${step.expr})`)(resolvedInput.value);
+          outputs = evalTransformExpr(step.expr, resolvedInput.value);
           plan[plan.length - 1].computed_outputs = deepClone(outputs);
         } catch {
           // fall back to placeholder

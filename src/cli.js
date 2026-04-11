@@ -6,6 +6,7 @@ import chokidar from "chokidar";
 import cron from "node-cron";
 import { assembleRuneflow } from "./assembler.js";
 import { dryrunRuneflow } from "./dryrun.js";
+import { runTest, loadFixture } from "./test-runner.js";
 import { importMarkdownRuneflow } from "./importer.js";
 import { runInit } from "./init.js";
 import { parseRuneflow } from "./parser.js";
@@ -13,6 +14,8 @@ import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins
 import { runRuneflow } from "./runtime.js";
 import { loadToolRegistry } from "./tool-registry.js";
 import { validateRuneflow } from "./validator.js";
+import { buildRuneflow } from "./builder.js";
+import { createDefaultRuntime } from "./default-runtime.js";
 
 const DEFAULT_RUNS_DIR = ".runeflow-runs";
 const LEGACY_RUNS_DIR = ".skill-runs";
@@ -46,7 +49,7 @@ function parseOptions(argumentsList) {
 
 async function loadRuntime(runtimePath) {
   if (!runtimePath) {
-    return {};
+    return createDefaultRuntime();
   }
 
   const absolutePath = path.resolve(process.cwd(), runtimePath);
@@ -165,6 +168,41 @@ function createPromptSession() {
   };
 }
 
+/**
+ * Build a test fixture from a completed run artifact.
+ * Captures inputs, per-step tool/llm outputs as mocks, and the final status.
+ * The author can review and edit the fixture, then use it with `runeflow test`.
+ */
+function buildFixtureFromRun(run, definition) {
+  const toolMocks = {};
+  const llmMocks = {};
+
+  for (const step of run.steps ?? []) {
+    if (step.status !== "success" || !step.outputs) continue;
+
+    const defStep = definition.workflow?.steps?.find((s) => s.id === step.id);
+    if (!defStep) continue;
+
+    if (defStep.kind === "tool") {
+      toolMocks[step.id] = step.outputs;
+    } else if (defStep.kind === "llm") {
+      llmMocks[step.id] = step.outputs;
+    }
+  }
+
+  return {
+    inputs: run.inputs ?? {},
+    mocks: {
+      tools: toolMocks,
+      llm: llmMocks,
+    },
+    expect: {
+      status: run.status,
+      outputs: run.outputs ?? {},
+    },
+  };
+}
+
 async function executeRun(target, options = {}) {
   const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
   const definition = parseRuneflow(source, { sourcePath: target });
@@ -182,11 +220,36 @@ async function executeRun(target, options = {}) {
       force: Boolean(options.force),
       promptValues,
       promptHandler: promptSession.promptHandler,
+      telemetry: Boolean(options.telemetry),
+      telemetryOutput: options["telemetry-output"],
     });
 
     return { definition, run, runsDir };
   } finally {
     promptSession.close();
+  }
+}
+
+function printValidation(target, validation) {
+  if (validation.valid && !validation.warnings?.length) {
+    console.log(`✓ ${target}`);
+    return;
+  }
+
+  if (!validation.valid) {
+    console.error(`✗ ${target}  ${validation.issues.length} error${validation.issues.length === 1 ? "" : "s"}`);
+    for (const issue of validation.issues) {
+      console.error(`  error  ${issue}`);
+    }
+  }
+
+  if (validation.warnings?.length) {
+    if (validation.valid) {
+      console.log(`⚠ ${target}  ${validation.warnings.length} warning${validation.warnings.length === 1 ? "" : "s"}`);
+    }
+    for (const warning of validation.warnings) {
+      console.error(`  warn   ${warning}`);
+    }
   }
 }
 
@@ -199,16 +262,20 @@ export async function runCli(argv) {
   runeflow init [--name <name>] [--context <hint>] [--template <id>]
                [--provider <provider>] [--model <model>]
                [--no-local-llm] [--no-polish] [--force]
-  runeflow validate <file> [--runtime ./runtime.js]
-  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force]
+  runeflow validate <file> [--runtime ./runtime.js] [--format json]
+  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--telemetry] [--telemetry-output <path>]
+  runeflow test <file> --fixture <fixture.json> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
   runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
-  runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md]
-  runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}]
+  runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md] [--format markdown|json]
+  runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}] [--step <step-id>] [--format table|json]
+  runeflow build <description> [--provider <p>] [--model <m>] [--out <file>] [--runtime ./runtime.js]
   runeflow import <file> [--output converted.runeflow.md]
   runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
   runeflow tools list [--runtime ./runtime.js]
-  runeflow tools inspect <tool-name> [--runtime ./runtime.js]`);
+  runeflow tools inspect <tool-name> [--runtime ./runtime.js]
+  runeflow skills list
+  runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]`);
     return;
   }
 
@@ -237,7 +304,13 @@ export async function runCli(argv) {
       const validation = validateRuneflow(definition, {
         runtimeToolRegistry: effectiveRuntime.toolRegistry,
       });
-      console.log(JSON.stringify(validation, null, 2));
+
+      if (options.format === "json") {
+        console.log(JSON.stringify(validation, null, 2));
+      } else {
+        printValidation(target, validation);
+      }
+
       if (!validation.valid) {
         process.exitCode = 1;
       }
@@ -249,10 +322,105 @@ export async function runCli(argv) {
 
   if (command === "run") {
     const target = positional[0];
-    const { run } = await executeRun(target, options);
+    const { run, definition } = await executeRun(target, options);
     console.log(JSON.stringify(run, null, 2));
+
+    if (options["record-fixture"]) {
+      const fixturePath = path.resolve(process.cwd(), options["record-fixture"]);
+      const fixture = buildFixtureFromRun(run, definition);
+      await fs.writeFile(fixturePath, JSON.stringify(fixture, null, 2));
+      console.error(`Fixture written to ${fixturePath}`);
+    }
+
     if (run.status !== "success") {
       process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "test") {
+    const target = positional[0];
+    if (!target) throw new Error("Usage: runeflow test <file> --fixture <fixture.json>");
+    const fixturePath = options.fixture;
+    if (!fixturePath) throw new Error("--fixture <path> is required for runeflow test");
+
+    const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
+    const definition = parseRuneflow(source, { sourcePath: target });
+    const runtime = await loadRuntime(options.runtime);
+    const fixture = await loadFixture(fixturePath);
+    const runsDir = options["runs-dir"] ? path.resolve(process.cwd(), options["runs-dir"]) : undefined;
+
+    const result = await runTest(definition, fixture, { runtime, runsDir });
+
+    const failureCount = result.failures.length;
+    const summary = result.pass
+      ? "Fixture passed."
+      : `Fixture failed with ${failureCount} assertion${failureCount === 1 ? "" : "s"}.`;
+
+    console.log(JSON.stringify({
+      pass: result.pass,
+      summary,
+      failure_count: failureCount,
+      failures: result.failures,
+      status: result.run?.status ?? null,
+      run_id: result.run?.run_id ?? null,
+      tool_calls: result.toolCallsByStep,
+      tool_calls_by_name: result.toolCalls,
+      llm_calls: result.llmCalls,
+    }, null, 2));
+
+    if (!result.pass) {
+      console.error(`FAIL  ${failureCount} assertion(s) failed`);
+      console.error("");
+      for (let i = 0; i < result.failures.length; i++) {
+        const f = result.failures[i];
+        console.error(`  ${i + 1}) ${f.path}`);
+        const expectedStr = JSON.stringify(f.expected, null, 2);
+        const actualStr = JSON.stringify(f.actual, null, 2);
+        const expectedLines = expectedStr.split("\n");
+        const actualLines = actualStr.split("\n");
+        if (expectedLines.length <= 1 && actualLines.length <= 1) {
+          // Scalar: compact patch-style diff with labels
+          console.error(`       expected: ${expectedStr}`);
+          console.error(`       actual:   ${actualStr}`);
+          console.error(`     - ${expectedStr}`);
+          console.error(`     + ${actualStr}`);
+        } else {
+          // Multi-line: show labelled blocks then removed/added lines
+          console.error(`       expected: ${expectedLines[0]}${expectedLines.length > 1 ? " ..." : ""}`);
+          console.error(`       actual:   ${actualLines[0]}${actualLines.length > 1 ? " ..." : ""}`);
+          for (const line of expectedLines) {
+            if (!actualLines.includes(line)) {
+              console.error(`     - ${line}`);
+            }
+          }
+          for (const line of actualLines) {
+            if (!expectedLines.includes(line)) {
+              console.error(`     + ${line}`);
+            }
+          }
+        }
+      }
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (command === "build") {
+    const description = positional[0];
+    if (!description) throw new Error("Usage: runeflow build <description> [--provider <p>] [--model <m>] [--out <file>]");
+
+    const provider = options.provider;
+    const model = options.model;
+    const runtime = await loadRuntime(options.runtime);
+
+    const output = await buildRuneflow(description, { provider, model, runtime });
+
+    if (options.out) {
+      await fs.writeFile(path.resolve(process.cwd(), options.out), output, "utf8");
+      console.log(`Written to ${options.out}`);
+    } else {
+      console.log(output);
     }
     return;
   }
@@ -274,10 +442,76 @@ export async function runCli(argv) {
 
   if (command === "inspect-run") {
     const runId = positional[0];
+    if (!runId) throw new Error("Usage: runeflow inspect-run <run-id> [--step <id>] [--format table|json]");
     const runsDir = path.resolve(process.cwd(), options["runs-dir"] ?? DEFAULT_RUNS_DIR);
     const fallbackRunsDir = options["runs-dir"] ? null : path.resolve(process.cwd(), LEGACY_RUNS_DIR);
-    const artifact = await loadRunArtifact(runId, runsDir, fallbackRunsDir);
-    console.log(JSON.stringify(JSON.parse(artifact), null, 2));
+    const raw = await loadRunArtifact(runId, runsDir, fallbackRunsDir);
+    const artifact = JSON.parse(raw);
+    const format = options.format ?? "json";
+
+    // --step <id>: show a single step artifact
+    if (options.step) {
+      // Determine which runs dir actually holds this run (primary or legacy fallback)
+      const resolvedRunsDir =
+        fallbackRunsDir && !(await fs.access(path.join(runsDir, runId, "steps")).then(() => true).catch(() => false))
+          ? fallbackRunsDir
+          : runsDir;
+      const stepArtifactPath = path.join(resolvedRunsDir, runId, "steps", `${options.step}.json`);
+      let stepRaw;
+      try {
+        stepRaw = await fs.readFile(stepArtifactPath, "utf8");
+      } catch {
+        throw new Error(`Step artifact not found: ${stepArtifactPath}`);
+      }
+      console.log(JSON.stringify(JSON.parse(stepRaw), null, 2));
+      return;
+    }
+
+    if (format === "table") {
+      // Compact step timeline
+      const rows = (artifact.steps ?? []).map((step) => {
+        const startMs = step.started_at ? Date.parse(step.started_at) : null;
+        const endMs = step.finished_at ? Date.parse(step.finished_at) : null;
+        const durationMs = startMs && endMs ? endMs - startMs : null;
+        const tokens = step.token_usage
+          ? `${step.token_usage.prompt_tokens ?? 0}p/${step.token_usage.completion_tokens ?? 0}c`
+          : "";
+        const statusDisplay = step.status === "failed" ? `✗ ${step.status}` : step.status === "success" ? `✓ ${step.status}` : step.status;
+        return {
+          id: step.id,
+          kind: step.kind,
+          status: statusDisplay,
+          duration: durationMs !== null ? `${durationMs}ms` : "-",
+          attempts: step.attempts ?? 1,
+          tokens,
+        };
+      });
+
+      const cols = ["id", "kind", "status", "duration", "attempts", "tokens"];
+      const widths = cols.map((col) =>
+        Math.max(col.length, ...rows.map((r) => String(r[col] ?? "").length)),
+      );
+      const header = cols.map((col, i) => col.padEnd(widths[i])).join("  ");
+      const divider = widths.map((w) => "-".repeat(w)).join("  ");
+      console.log(`Run: ${artifact.run_id}  status: ${artifact.status}`);
+      console.log(divider);
+      console.log(header);
+      console.log(divider);
+      for (const row of rows) {
+        console.log(cols.map((col, i) => String(row[col] ?? "").padEnd(widths[i])).join("  "));
+      }
+      console.log(divider);
+      if (artifact.status === "halted_on_error" && artifact.halted_step_id) {
+        console.log(`Failed step: ${artifact.halted_step_id}`);
+      }
+      if (artifact.error) {
+        console.log(`Error: ${artifact.error.message}`);
+      }
+      return;
+    }
+
+    // default: json
+    console.log(JSON.stringify(artifact, null, 2));
     return;
   }
 
@@ -328,7 +562,17 @@ export async function runCli(argv) {
     const runtime = await loadRuntime(options.runtime);
     const input = await loadInput(options.input);
 
-    const assembled = await assembleRuneflow(definition, stepId, input, runtime);
+    const assembled = await assembleRuneflow(definition, stepId, input, runtime, { format: options.format });
+
+    if (options.format === "json") {
+      if (options.output) {
+        await fs.writeFile(path.resolve(process.cwd(), options.output), JSON.stringify(assembled, null, 2));
+        console.error(`Written to ${options.output}`);
+      } else {
+        console.log(JSON.stringify(assembled, null, 2));
+      }
+      return;
+    }
 
     if (options.output) {
       await fs.writeFile(path.resolve(process.cwd(), options.output), assembled);
@@ -471,6 +715,64 @@ export async function runCli(argv) {
       console.log(converted);
     }
     return;
+  }
+
+  if (command === "skills") {
+    const subcommand = positional[0];
+    const skillsDir = path.resolve(process.cwd(), ".runeflow", "skills");
+
+    if (!subcommand || subcommand === "list") {
+      let entries;
+      try {
+        entries = await fs.readdir(skillsDir);
+      } catch {
+        console.log("No skills found. Create .runeflow/skills/ and add .runeflow.md files.");
+        return;
+      }
+
+      const mdFiles = entries.filter((f) => f.endsWith(".runeflow.md") || f.endsWith(".md"));
+      if (mdFiles.length === 0) {
+        console.log("No skills found in .runeflow/skills/");
+        return;
+      }
+
+      const rows = [];
+      for (const file of mdFiles.sort()) {
+        const source = await fs.readFile(path.join(skillsDir, file), "utf8").catch(() => "");
+        const nameMatch = source.match(/^name:\s*(.+)$/m);
+        const descMatch = source.match(/^description:\s*(.+)$/m);
+        const name = nameMatch?.[1]?.trim() ?? path.basename(file, ".runeflow.md");
+        const desc = descMatch?.[1]?.trim() ?? "";
+        rows.push(`  ${name.padEnd(28)} ${file.padEnd(36)} ${desc}`);
+      }
+      console.log(rows.join("\n"));
+      return;
+    }
+
+    if (subcommand === "run") {
+      const skillName = positional[1];
+      if (!skillName) throw new Error("Usage: runeflow skills run <name> [--input '{}'] [--runtime ./runtime.js]");
+
+      // Resolve by name: try <name>.runeflow.md then <name>.md
+      let skillPath = path.join(skillsDir, `${skillName}.runeflow.md`);
+      try {
+        await fs.access(skillPath);
+      } catch {
+        skillPath = path.join(skillsDir, `${skillName}.md`);
+        try {
+          await fs.access(skillPath);
+        } catch {
+          throw new Error(`Skill '${skillName}' not found in .runeflow/skills/`);
+        }
+      }
+
+      const { run } = await executeRun(skillPath, options);
+      console.log(JSON.stringify(run, null, 2));
+      if (run.status !== "success") process.exitCode = 1;
+      return;
+    }
+
+    throw new Error(`Unknown skills subcommand '${subcommand}'. Use 'list' or 'run <name>'.`);
   }
 
   if (command === "tools") {

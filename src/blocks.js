@@ -6,7 +6,7 @@ const BLOCK_TEMPLATE_KINDS = new Set(["tool", "llm", "transform"]);
  * Expands `step … type=block { block: name, … }` using named `block` declarations.
  * Drops `workflow.blocks` from the returned workflow.
  */
-export function resolveWorkflowBlocks(workflow) {
+export function resolveWorkflowBlocks(workflow, importedBlocks = new Map()) {
   if (!workflow || typeof workflow !== "object") {
     return workflow;
   }
@@ -15,11 +15,11 @@ export function resolveWorkflowBlocks(workflow) {
   const steps = workflow.steps ?? [];
   const hasBlockSteps = steps.some((s) => s.kind === "block");
 
-  if (blockList.length === 0 && !hasBlockSteps) {
+  if (blockList.length === 0 && !hasBlockSteps && importedBlocks.size === 0) {
     return { steps, output: workflow.output ?? {} };
   }
 
-  const seen = new Set();
+  const seen = new Set(importedBlocks.keys());
   for (const b of blockList) {
     if (seen.has(b.id)) {
       throw new SkillSyntaxError(`Duplicate block id '${b.id}'.`);
@@ -37,7 +37,10 @@ export function resolveWorkflowBlocks(workflow) {
     }
   }
 
-  const blockMap = new Map(blockList.map((b) => [b.id, b]));
+  const blockMap = new Map([
+    ...importedBlocks.entries(),
+    ...blockList.map((b) => [b.id, b])
+  ]);
 
   const resolvedSteps = steps.map((step) => {
     if (step.kind !== "block") {
@@ -68,5 +71,6 @@ export function resolveWorkflowBlocks(workflow) {
   return {
     steps: resolvedSteps,
     output: workflow.output ?? {},
+    blocks: blockList,  // preserve for cross-file import consumers
   };
 }

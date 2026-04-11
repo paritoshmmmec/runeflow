@@ -67,14 +67,18 @@ test("deepExpandEnvVars expands default-listed provider keys", () => {
   _resetEnvAllowlistCache();
   delete process.env.RUNEFLOW_ENV_ALLOWLIST;
   process.env.CEREBRAS_API_KEY = "test-cerebras-key";
+  process.env.GITHUB_TOKEN = "ghp-test-token";
   try {
     const result = deepExpandEnvVars({
       url: "https://api.example.com",
       auth: "Bearer ${CEREBRAS_API_KEY}",
+      githubAuth: "Bearer ${GITHUB_TOKEN}",
     });
     assert.equal(result.auth, "Bearer test-cerebras-key");
+    assert.equal(result.githubAuth, "Bearer ghp-test-token");
   } finally {
     delete process.env.CEREBRAS_API_KEY;
+    delete process.env.GITHUB_TOKEN;
     _resetEnvAllowlistCache();
   }
 });
