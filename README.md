@@ -12,6 +12,16 @@
 [![node](https://img.shields.io/badge/node-%3E%3D20-green)](#)
 
 </div>
+---
+
+## 📊 Current State
+
+Runeflow is in **active development (v0.4.x)**. It is stable for CLI automation and agent-pre-processing (Assemble mode). We use it to build and maintain the project itself.
+
+**Core Philosophy:**
+- **Human-first, LLM-second**: Workflows should be readable and executable by humans without an LLM.
+- **Typed & Validated**: Reference checking and schema enforcement happen *before* tokens are spent.
+- **Small Runtime**: Minimal abstractions, explicit control flow, and no hidden "magic" orchestration.
 
 ---
 
@@ -828,8 +838,9 @@ export RUNEFLOW_ENV_ALLOWLIST=*
 | v0.1 | ✅ shipped | `tool`, `llm`, `transform`, `branch`, `block`, `cli`, `resume`, caching, tools CLI, `assemble`, `init`, `--force` |
 | v0.2 | ✅ shipped | `human_input`, `runeflow watch`, parallel tool steps, MCP client plugins (stdio + HTTP), Composio client plugin, env var allowlist |
 | v0.3 | ✅ shipped | `runeflow-mcp` (MCP server), `runeflow-registry` (GitHub, Linear, Slack, Notion), `dryrun`, `mcp_servers` frontmatter, `composio` frontmatter |
-| v0.4 | ✅ shipped | smarter `runeflow init` — repo inspection, heuristic template selection, Claude skill conversion, local LLM fallback |
-| v0.5 | 📅 planned | `runeflow build` (LLM → skill compiler), `runeflow test` harness, skill composition / imports |
+| v0.4 | ✅ shipped | smarter `runeflow init` (repo inspection, heuristics, conversion), local LLM fallback, **TypeScript definitions**, **Streaming CLI output** |
+| v0.5 | 📅 in progress | `runeflow test` (behavioral test harness), `runeflow build` (LLM → skill compiler), cross-file skill composition / imports |
+| v0.6 | 📅 planned | Remote execution (server mode), Web Dashboard for run artifact inspection |
 
 ---
 
