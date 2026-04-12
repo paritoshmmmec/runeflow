@@ -8,7 +8,7 @@
  *   3b. Generation_Mode — heuristic template selection
  *
  * Writes:
- *   <slug>.runeflow.md   — the skill file (or converted files)
+ *   <slug>.md   — the skill file (or converted files)
  *   runtime.js           — runtime wired to the resolved provider
  */
 
@@ -118,7 +118,7 @@ async function polishSkill(content, { provider, model, log }) {
     const { object } = await generateObject({
       model: llmModel,
       schema: z.object({ content: z.string() }),
-      prompt: `You are a Runeflow skill author. Improve the following .runeflow.md file:
+      prompt: `You are a Runeflow skill author. Improve the following .md file:
 - Make the operator guidance (Markdown prose) more specific and useful
 - Improve the LLM step prompt to be more precise
 - Keep all frontmatter, step structure, and output schema exactly as-is
@@ -272,7 +272,7 @@ export default createDefaultRuntime();
 }
 
 // ---------------------------------------------------------------------------
-// Extract skill name from generated .runeflow.md frontmatter
+// Extract skill name from generated .md frontmatter
 // ---------------------------------------------------------------------------
 
 function extractSkillNameFromContent(content) {
@@ -337,7 +337,7 @@ async function runConversionMode(signals, options, { provider, model, isCloud, i
 
     // Determine output filename
     const baseName = path.basename(skillFile.path, ".md");
-    const outFile = path.join(cwd, `${baseName}.runeflow.md`);
+    const outFile = path.join(cwd, `${baseName}.md`);
 
     if (await fileExists(outFile) && !force) {
       throw new Error(`${path.basename(outFile)} already exists. Use --force to overwrite.`);
@@ -409,7 +409,7 @@ async function runGenerationMode(signals, options, { provider, model, isCloud, i
     ? slugify(options.name)
     : (extractSkillNameFromContent(content) ?? slugify(selection.templateId));
 
-  const skillFile = path.join(cwd, `${skillName}.runeflow.md`);
+  const skillFile = path.join(cwd, `${skillName}.md`);
   const runtimeFile = path.join(cwd, "runtime.js");
 
   if (await fileExists(skillFile) && !force) {

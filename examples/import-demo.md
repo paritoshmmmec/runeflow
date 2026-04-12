@@ -1,6 +1,6 @@
 ---
 name: import-demo
-description: Demonstrates cross-file block imports from shared-blocks.runeflow.md.
+description: Demonstrates cross-file block imports from shared-blocks.md.
 version: 0.1
 inputs:
   base_branch: string
@@ -16,11 +16,11 @@ llm:
 
 # Import Demo
 
-Shows how to import reusable blocks from another `.runeflow.md` file.
-The `check_file_exists` block comes from `shared-blocks.runeflow.md`.
+Shows how to import reusable blocks from another `.md` file.
+The `check_file_exists` block comes from `shared-blocks.md`.
 
 ```runeflow
-import blocks from "./shared-blocks.runeflow.md"
+import blocks from "./shared-blocks.md"
 
 step branch type=tool {
   tool: git.current_branch

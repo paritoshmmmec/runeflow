@@ -880,8 +880,8 @@ output {
 
 test("validateRuneflow loads and merges cross-file imported blocks", async () => {
   const tmpdir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-test-imports-"));
-  const importedFile = path.join(tmpdir, "shared.runeflow.md");
-  const mainFile = path.join(tmpdir, "main.runeflow.md");
+  const importedFile = path.join(tmpdir, "shared.md");
+  const mainFile = path.join(tmpdir, "main.md");
 
   await fs.writeFile(importedFile, `---
 name: shared
@@ -907,7 +907,7 @@ outputs:
   greeting: string
 ---
 \`\`\`runeflow
-import blocks from "./shared.runeflow.md"
+import blocks from "./shared.md"
 
 step greet type=block {
   block: hello_template
@@ -937,7 +937,7 @@ outputs:
   greeting: string
 ---
 \`\`\`runeflow
-import blocks from "./does-not-exist.runeflow.md"
+import blocks from "./does-not-exist.md"
 
 step greet type=block {
   block: hello_template
@@ -949,7 +949,7 @@ output {
 \`\`\`
 `);
 
-  const validation = validateRuneflow(parsed, { sourcePath: "/mock/main.runeflow.md" });
+  const validation = validateRuneflow(parsed, { sourcePath: "/mock/main.md" });
   assert.equal(validation.valid, false);
   assert.ok(validation.issues.some((i) => i.includes("Imported file not found")));
   // Cascading "Unknown block" noise should be suppressed when the root cause is a missing import

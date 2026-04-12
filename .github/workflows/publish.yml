@@ -31,9 +31,9 @@ jobs:
 
       - name: Validate examples
         run: |
-          node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md
-          node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md
-          node ./bin/runeflow.js validate ./examples/release-notes.runeflow.md
+          npx runeflow validate ./examples/open-pr.md
+          npx runeflow validate ./examples/block-demo.md
+          npx runeflow validate ./examples/release-notes.md
 
       - name: Publish runeflow
         run: npm publish --provenance --access public

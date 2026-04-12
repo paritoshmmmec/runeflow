@@ -30,7 +30,7 @@ test("runCli inspect-run reads artifacts from the default runeflow runs director
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: cli-demo
 description: CLI demo
@@ -65,11 +65,11 @@ output {
 
   try {
     const runOutput = await captureStdout(() =>
-      runCli(["run", "./workflow.runeflow.md", "--runtime", "./runtime.js"]),
+      runCli(["run", "./workflow.md", "--runtime", "./runtime.js"]),
     );
     const run = JSON.parse(runOutput);
 
-    assert.match(run.artifact_path, /\.runeflow-runs\/.+\.json$/);
+    assert.match(run.artifact_path, /\.runeflow\/output\/.+\.json$/);
 
     const inspectOutput = await captureStdout(() => runCli(["inspect-run", run.run_id]));
     const inspectedRun = JSON.parse(inspectOutput);
@@ -81,15 +81,15 @@ output {
   }
 });
 
-test("runCli inspect-run falls back to legacy skill runs when no runeflow artifact exists", async () => {
+test("runCli inspect-run reads artifacts from .runeflow/output", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-legacy-"));
   const originalCwd = process.cwd();
   const runId = "run_legacy_demo";
-  const legacyRunsDir = path.join(tempDir, ".skill-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
 
-  await fs.mkdir(legacyRunsDir, { recursive: true });
+  await fs.mkdir(runsDir, { recursive: true });
   await fs.writeFile(
-    path.join(legacyRunsDir, `${runId}.json`),
+    path.join(runsDir, `${runId}.json`),
     JSON.stringify({
       run_id: runId,
       status: "success",
@@ -116,7 +116,7 @@ test("runCli run uses built-in tools without a custom runtime module", async () 
 
   await fs.writeFile(path.join(tempDir, "present.txt"), "ready\n");
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: builtin-demo
 description: Built-in tool demo
@@ -143,7 +143,7 @@ output {
   process.chdir(tempDir);
 
   try {
-    const output = await captureStdout(() => runCli(["run", "./workflow.runeflow.md"]));
+    const output = await captureStdout(() => runCli(["run", "./workflow.md"]));
     const run = JSON.parse(output);
 
     assert.equal(run.status, "success");
@@ -158,7 +158,7 @@ test("runCli resume: retries from halted step, replaying prior successful steps 
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: resume-demo
 description: Resume demo
@@ -205,7 +205,7 @@ output {
 
   try {
     // Manually create a halted run artifact to simulate a prior failed run
-    const runsDir = path.join(tempDir, ".runeflow-runs");
+    const runsDir = path.join(tempDir, ".runeflow/output");
     await fs.mkdir(runsDir, { recursive: true });
     const stepsDir = path.join(runsDir, "run_20260101000000_aaaaaa", "steps");
     await fs.mkdir(stepsDir, { recursive: true });
@@ -255,7 +255,7 @@ output {
     );
 
     const output = await captureStdout(() =>
-      runCli(["resume", "./workflow.runeflow.md", "--runtime", "./runtime.js"]),
+      runCli(["resume", "./workflow.md", "--runtime", "./runtime.js"]),
     );
     const run = JSON.parse(output);
 
@@ -290,7 +290,7 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
       noLocalLlm: true,
     });
 
-    const skillContent = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
+    const skillContent = await fs.readFile(path.join(tempDir, "my-skill.md"), "utf8");
 
     assert.ok(skillContent.includes("name: my-skill"));
     assert.ok(skillContent.includes("provider: cerebras"));
@@ -308,7 +308,7 @@ test("parseOptions: --force without a value is treated as boolean true", async (
   const originalCwd = process.cwd();
 
   // Pre-create the skill file so --force is needed to overwrite
-  await fs.writeFile(path.join(tempDir, "my-skill.runeflow.md"), "existing content");
+  await fs.writeFile(path.join(tempDir, "my-skill.md"), "existing content");
 
   process.chdir(tempDir);
   try {
@@ -324,7 +324,7 @@ test("parseOptions: --force without a value is treated as boolean true", async (
       noLocalLlm: true,
     });
 
-    const content = await fs.readFile(path.join(tempDir, "my-skill.runeflow.md"), "utf8");
+    const content = await fs.readFile(path.join(tempDir, "my-skill.md"), "utf8");
     assert.ok(content.includes("name: my-skill"), "file was overwritten");
   } finally {
     process.chdir(originalCwd);
@@ -336,7 +336,7 @@ test("runCli run accepts human_input answers via --prompt", async () => {
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: prompt-demo
 description: Prompt demo
@@ -363,7 +363,7 @@ output {
 
   try {
     const output = await captureStdout(() =>
-      runCli(["run", "./workflow.runeflow.md", "--prompt", '{"confirm":"yes"}']),
+      runCli(["run", "./workflow.md", "--prompt", '{"confirm":"yes"}']),
     );
     const run = JSON.parse(output);
 
@@ -379,7 +379,7 @@ test("runCli resume continues a halted_on_input run with --prompt", async () => 
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: resume-input-demo
 description: Resume input demo
@@ -406,14 +406,14 @@ output {
 
   try {
     const firstOutput = await captureStdout(() =>
-      runCli(["run", "./workflow.runeflow.md"]),
+      runCli(["run", "./workflow.md"]),
     );
     const firstRun = JSON.parse(firstOutput);
 
     assert.equal(firstRun.status, "halted_on_input");
 
     const resumedOutput = await captureStdout(() =>
-      runCli(["resume", "./workflow.runeflow.md", "--prompt", '{"confirm":"no"}']),
+      runCli(["resume", "./workflow.md", "--prompt", '{"confirm":"no"}']),
     );
     const resumedRun = JSON.parse(resumedOutput);
 
@@ -430,7 +430,7 @@ test("runCli validate loads plugin-contributed tool schemas from --runtime", asy
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: plugin-validate
 description: Plugin validate
@@ -483,7 +483,7 @@ export default {
 
   try {
     const output = await captureStdout(() =>
-      runCli(["validate", "./workflow.runeflow.md", "--runtime", "./runtime.js", "--format", "json"]),
+      runCli(["validate", "./workflow.md", "--runtime", "./runtime.js", "--format", "json"]),
     );
     const validation = JSON.parse(output);
 
@@ -545,7 +545,7 @@ test("runCli run works with a discovered Composio client plugin runtime", async 
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: composio-client-cli
 description: Composio client CLI
@@ -609,7 +609,7 @@ export default {
 
   try {
     const output = await captureStdout(() =>
-      runCli(["run", "./workflow.runeflow.md", "--runtime", "./runtime.js", "--input", '{"title":"Ship it"}']),
+      runCli(["run", "./workflow.md", "--runtime", "./runtime.js", "--input", '{"title":"Ship it"}']),
     );
     const run = JSON.parse(output);
 
@@ -627,7 +627,7 @@ test("runCli run works with a real MCP stdio plugin runtime", async () => {
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: real-mcp-cli
 description: Real MCP CLI
@@ -672,7 +672,7 @@ export default {
 
   try {
     const output = await captureStdout(() =>
-      runCli(["run", "./workflow.runeflow.md", "--runtime", "./runtime.js", "--input", '{"query":"docs"}']),
+      runCli(["run", "./workflow.md", "--runtime", "./runtime.js", "--input", '{"query":"docs"}']),
     );
     const run = JSON.parse(output);
 
@@ -699,7 +699,7 @@ test("runCli init: passes --context flag to runInit", async () => {
       runCli(["init", "--context", "stripe payment", "--no-local-llm", "--no-polish", "--name", "ctx-test"]),
     );
 
-    const skillPath = path.join(tempDir, "ctx-test.runeflow.md");
+    const skillPath = path.join(tempDir, "ctx-test.md");
     const exists = await fs.access(skillPath).then(() => true).catch(() => false);
     assert.ok(exists, "--context flag should not prevent skill creation");
   } finally {
@@ -719,7 +719,7 @@ test("runCli init: passes --template flag to runInit", async () => {
     );
 
     const entries = await fs.readdir(tempDir);
-    const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
+    const skillFiles = entries.filter((f) => f.endsWith(".md"));
     assert.ok(skillFiles.length >= 1, "--template flag should produce a skill file");
 
     const content = await fs.readFile(path.join(tempDir, skillFiles[0]), "utf8");
@@ -741,7 +741,7 @@ test("runCli init: passes --no-local-llm flag to runInit", async () => {
       runCli(["init", "--no-local-llm", "--no-polish", "--name", "nollm-test"]),
     );
 
-    const skillPath = path.join(tempDir, "nollm-test.runeflow.md");
+    const skillPath = path.join(tempDir, "nollm-test.md");
     const exists = await fs.access(skillPath).then(() => true).catch(() => false);
     assert.ok(exists, "--no-local-llm should still produce a skill file");
   } finally {
@@ -760,7 +760,7 @@ test("runCli init: passes --no-polish flag to runInit", async () => {
       runCli(["init", "--no-polish", "--no-local-llm", "--name", "nopolish-test"]),
     );
 
-    const skillPath = path.join(tempDir, "nopolish-test.runeflow.md");
+    const skillPath = path.join(tempDir, "nopolish-test.md");
     const exists = await fs.access(skillPath).then(() => true).catch(() => false);
     assert.ok(exists, "--no-polish should still produce a skill file");
 
@@ -776,7 +776,7 @@ test("runCli inspect-run --format table prints step timeline", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-table-"));
   const originalCwd = process.cwd();
   const runId = "run_table_test";
-  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
 
   await fs.mkdir(runsDir, { recursive: true });
   await fs.writeFile(
@@ -813,7 +813,7 @@ test("runCli inspect-run --step shows single step artifact", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-step-"));
   const originalCwd = process.cwd();
   const runId = "run_step_test";
-  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
   const stepsDir = path.join(runsDir, runId, "steps");
 
   await fs.mkdir(stepsDir, { recursive: true });
@@ -847,7 +847,7 @@ test("runCli run --record-fixture writes a fixture file from the run", async () 
   const fixturePath = path.join(tempDir, "fixture.json");
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: fixture-demo
 description: Fixture recording demo
@@ -890,7 +890,7 @@ output {
   try {
     await captureStdout(() =>
       runCli([
-        "run", "workflow.runeflow.md",
+        "run", "workflow.md",
         "--input", '{"name":"Alice"}',
         "--runtime", "./runtime.js",
         "--record-fixture", fixturePath,
@@ -914,7 +914,7 @@ test("runCli run --record-fixture records tool mocks by step id", async () => {
   const fixturePath = path.join(tempDir, "fixture.json");
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: fixture-tool-demo
 description: Fixture recording demo for tools
@@ -945,7 +945,7 @@ output {
     await fs.writeFile(path.join(tempDir, "present.txt"), "ok\n");
     await captureStdout(() =>
       runCli([
-        "run", "workflow.runeflow.md",
+        "run", "workflow.md",
         "--input", '{"path":"./present.txt"}',
         "--record-fixture", fixturePath,
       ]),
@@ -965,7 +965,7 @@ test("runCli test includes call traces and summary", async () => {
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: cli-test-demo
 description: CLI test summary demo
@@ -1026,7 +1026,7 @@ output {
 
   try {
     const output = await captureStdout(() =>
-      runCli(["test", "./workflow.runeflow.md", "--fixture", "./fixture.json"]),
+      runCli(["test", "./workflow.md", "--fixture", "./fixture.json"]),
     );
     const result = JSON.parse(output);
 
@@ -1041,17 +1041,18 @@ output {
   }
 });
 
-test("runCli skills list shows skills from .runeflow/skills/", async () => {
+test("runCli skills list shows skills from skills/", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-skills-"));
   const originalCwd = process.cwd();
-  const skillsDir = path.join(tempDir, ".runeflow", "skills");
+  const skillsDir = path.join(tempDir, "skills");
 
   await fs.mkdir(skillsDir, { recursive: true });
   await fs.writeFile(
-    path.join(skillsDir, "open-pr.runeflow.md"),
+    path.join(skillsDir, "open-pr.md"),
     `---
 name: open-pr
 description: Open a pull request from the current branch.
+runeflow: true
 version: 0.1
 inputs: {}
 outputs: {}
@@ -1059,10 +1060,11 @@ outputs: {}
 `,
   );
   await fs.writeFile(
-    path.join(skillsDir, "release-notes.runeflow.md"),
+    path.join(skillsDir, "release-notes.md"),
     `---
 name: release-notes
 description: Draft release notes from git log.
+runeflow: true
 version: 0.1
 inputs: {}
 outputs: {}
@@ -1125,7 +1127,7 @@ test("runCli test writes human-readable failure summary to stderr", async () => 
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: test-stderr-demo
 description: Test stderr output
@@ -1182,7 +1184,7 @@ output {
     console.log = (...args) => { stdoutOutput += args.join(" ") + "\n"; };
 
     try {
-      await runCli(["test", "./workflow.runeflow.md", "--fixture", "./fixture.json"]);
+      await runCli(["test", "./workflow.md", "--fixture", "./fixture.json"]);
     } finally {
       console.error = origError;
       console.log = origLog;
@@ -1217,7 +1219,7 @@ test("runCli test does not write failure output to stderr when test passes", asy
   const originalCwd = process.cwd();
 
   await fs.writeFile(
-    path.join(tempDir, "workflow.runeflow.md"),
+    path.join(tempDir, "workflow.md"),
     `---
 name: test-pass-stderr
 description: Passing test
@@ -1274,7 +1276,7 @@ output {
     console.log = (...args) => { stdoutOutput += args.join(" ") + "\n"; };
 
     try {
-      await runCli(["test", "./workflow.runeflow.md", "--fixture", "./fixture.json"]);
+      await runCli(["test", "./workflow.md", "--fixture", "./fixture.json"]);
     } finally {
       console.error = origError;
       console.log = origLog;
@@ -1303,7 +1305,7 @@ test("runCli inspect-run --format table includes id, kind, status, duration, and
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-table-cols-"));
   const originalCwd = process.cwd();
   const runId = "run_table_cols_test";
-  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
 
   await fs.mkdir(runsDir, { recursive: true });
   await fs.writeFile(
@@ -1339,7 +1341,7 @@ test("runCli inspect-run --format table prints failed step id and error message 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-table-halted-"));
   const originalCwd = process.cwd();
   const runId = "run_halted_test";
-  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
 
   await fs.mkdir(runsDir, { recursive: true });
   await fs.writeFile(
@@ -1376,7 +1378,7 @@ test("runCli inspect-run --step missing artifact error includes the expected art
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-step-missing-"));
   const originalCwd = process.cwd();
   const runId = "run_step_missing_test";
-  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
 
   await fs.mkdir(runsDir, { recursive: true });
   await fs.writeFile(
@@ -1406,7 +1408,7 @@ test("runCli inspect-run --format table visually distinguishes failed steps with
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-table-markers-"));
   const originalCwd = process.cwd();
   const runId = "run_markers_test";
-  const runsDir = path.join(tempDir, ".runeflow-runs");
+  const runsDir = path.join(tempDir, ".runeflow/output");
 
   await fs.mkdir(runsDir, { recursive: true });
   await fs.writeFile(

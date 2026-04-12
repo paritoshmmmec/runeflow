@@ -1,11 +1,11 @@
 import { runRuneflow } from "./runtime.js";
 
 /**
- * Generates a .runeflow.md file from an English description or JSON spec.
+ * Generates a .md file from an English description or JSON spec.
  *
  * @param {string} description - English description or JSON string
  * @param {object} options - { provider, model, apiKey, ... }
- * @returns {Promise<string>} - The generated .runeflow.md content
+ * @returns {Promise<string>} - The generated .md content
  */
 export async function buildRuneflow(description, options = {}) {
   const { provider, model } = options;
@@ -15,13 +15,13 @@ export async function buildRuneflow(description, options = {}) {
   }
 
   const prompt = `
-You are a Runeflow developer. Your task is to translate an English description of a workflow into a .runeflow.md file.
+You are a Runeflow developer. Your task is to translate an English description of a workflow into a .md file.
 
 Runeflow uses Markdown as its primary format. The frontmatter declares metadata, the prose is human-readable guidance, and a fenced \`runeflow\` block holds the executable workflow logic.
 Available step kinds: tool, llm, transform, parallel, branch, human_input, fail.
 
 Example:
-Description: A .runeflow.md that reads a file and summarizes it.
+Description: A .md that reads a file and summarizes it.
 Result:
 ---
 name: summarize-file
@@ -60,7 +60,7 @@ Common built-in tools:
 - git.current_branch {} -> { branch: string }
 - git.diff_summary { base: string, head: string } -> { summary: string }
 
-Now, translate the following description into a high-quality .runeflow.md file.
+Now, translate the following description into a high-quality .md file.
 Use the double-brace syntax for referencing step outputs, e.g., {{ steps.id.field }}.
 Output ONLY the file content, no conversational filler.
 

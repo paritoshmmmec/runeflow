@@ -60,7 +60,7 @@ test("Property 11: All written file paths appear in stdout for any flag combinat
 
           // Find all files written to the temp dir
           const entries = await fs.readdir(dir);
-          const writtenFiles = entries.filter((f) => f.endsWith(".runeflow.md") || f === "runtime.js");
+          const writtenFiles = entries.filter((f) => f.endsWith(".md") || f === "runtime.js");
 
           const stdout = capturedLines.join("\n");
 
@@ -175,7 +175,7 @@ test("Property 9: Polish path produces a skill with the same step IDs and types 
           });
 
           const entries = await fs.readdir(dir);
-          const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
+          const skillFiles = entries.filter((f) => f.endsWith(".md"));
           assert.ok(skillFiles.length >= 1, "Should write at least one skill file");
 
           const content = await fs.readFile(path.join(dir, skillFiles[0]), "utf8");
