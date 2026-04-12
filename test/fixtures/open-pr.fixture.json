@@ -1,0 +1,38 @@
+{
+  "_comment": "Fixture for examples/open-pr.runeflow.md. Run with: runeflow test examples/open-pr.runeflow.md --fixture test/fixtures/open-pr.fixture.json",
+  "inputs": {
+    "base_branch": "main"
+  },
+  "mocks": {
+    "tools": {
+      "check_template": { "exists": true },
+      "current_branch": { "branch": "feat/my-feature" },
+      "summarize_diff": {
+        "base": "main",
+        "summary": "Added new feature X with supporting tests.",
+        "files": ["src/feature.js", "test/feature.test.js"]
+      },
+      "finish": {
+        "branch": "feat/my-feature",
+        "title": "feat: add feature X",
+        "body": "## Summary\n\nAdds feature X with supporting tests.\n\n## Changes\n- `src/feature.js`: core implementation\n- `test/feature.test.js`: unit tests",
+        "diff_summary": "Added new feature X with supporting tests."
+      }
+    },
+    "llm": {
+      "draft_pr": {
+        "title": "feat: add feature X",
+        "body": "## Summary\n\nAdds feature X with supporting tests.\n\n## Changes\n- `src/feature.js`: core implementation\n- `test/feature.test.js`: unit tests"
+      }
+    }
+  },
+  "expect": {
+    "status": "success",
+    "outputs": {
+      "branch": "feat/my-feature",
+      "title": "feat: add feature X",
+      "body": "## Summary\n\nAdds feature X with supporting tests.\n\n## Changes\n- `src/feature.js`: core implementation\n- `test/feature.test.js`: unit tests",
+      "diff_summary": "Added new feature X with supporting tests."
+    }
+  }
+}

@@ -1335,7 +1335,7 @@ test("runCli inspect-run --format table includes id, kind, status, duration, and
   }
 });
 
-test("runCli inspect-run --format table prints failed step id and error message below table when halted_on_error", async () => {
+test("runCli inspect-run --format table prints failed step id and error message inline when halted_on_error", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-table-halted-"));
   const originalCwd = process.cwd();
   const runId = "run_halted_test";
@@ -1361,10 +1361,11 @@ test("runCli inspect-run --format table prints failed step id and error message 
     const output = await captureStdout(() =>
       runCli(["inspect-run", runId, "--format", "table"]),
     );
-    // Task 5.2: failed step id printed below table
-    assert.match(output, /Failed step: fetch/);
-    // Task 5.2: error message printed below table
-    assert.match(output, /Error: network timeout/);
+    // Error message is now shown inline on the failed step row, not below the table
+    assert.match(output, /✗ failed.*network timeout/);
+    // The old footer lines should no longer appear
+    assert.doesNotMatch(output, /^Failed step:/m);
+    assert.doesNotMatch(output, /^Error:/m);
   } finally {
     process.chdir(originalCwd);
     await fs.rm(tempDir, { recursive: true, force: true });

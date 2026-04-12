@@ -82,6 +82,7 @@ On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runefl
 
 - [Quickstart](#quickstart)
 - [Core Loop](#core-loop)
+- [Debugging a broken skill](#debugging-a-broken-skill)
 - [File shape](#file-shape)
 - [Step kinds](#step-kinds)
 - [Expressions](#expressions)
@@ -225,6 +226,81 @@ The commands an author uses in order, from first write to verified test:
 4. `runeflow inspect-run <run-id>` — Reads and formats run artifacts to help diagnose failures.
 5. `runeflow run <file> --record-fixture <path>` — Records a completed run as a reusable fixture file for testing.
 6. `runeflow test <file> --fixture <fixture.json>` — Runs a skill against a fixture file with mocked tools and LLM calls to verify behavior.
+
+---
+
+## Debugging a broken skill
+
+When a run fails, work through these steps in order.
+
+**1. Validate first**
+
+```bash
+runeflow validate ./my-skill.runeflow.md
+```
+
+Validation is static — no API calls, no git. It catches broken step references, missing inputs, and schema mismatches before you spend tokens. Fix any errors here before going further.
+
+**2. Dryrun to see what each step would do**
+
+```bash
+runeflow dryrun ./my-skill.runeflow.md --input '{"base_branch":"main"}'
+```
+
+Dryrun walks every step and resolves all bindings without executing anything. It shows the resolved prompt, tool arguments, branch conditions, and command strings. If a step would receive the wrong input, you'll see it here.
+
+**3. Run and inspect the artifact**
+
+```bash
+runeflow run ./my-skill.runeflow.md --input '{"base_branch":"main"}'
+# note the run_id in the output, e.g. run_20260401121315_dojn0r
+
+runeflow inspect-run run_20260401121315_dojn0r --format table
+```
+
+The table view shows every step's status, duration, and — on the failed row — the error message inline. No scrolling required.
+
+To drill into a specific step:
+
+```bash
+runeflow inspect-run run_20260401121315_dojn0r --step draft_pr
+```
+
+This prints the full step artifact: inputs, outputs, error, and timing.
+
+**4. Resume after fixing a transient failure**
+
+If the run halted on a tool error or `human_input` step, fix the underlying issue and resume from where it stopped — completed steps replay from cache:
+
+```bash
+runeflow resume ./my-skill.runeflow.md
+```
+
+**5. Record a fixture and test**
+
+Once the run succeeds, record it as a fixture so you can catch regressions without real API calls:
+
+```bash
+runeflow run ./my-skill.runeflow.md --input '{"base_branch":"main"}' --record-fixture test/fixtures/my-skill.fixture.json
+```
+
+Then run it in test mode:
+
+```bash
+runeflow test ./my-skill.runeflow.md --fixture test/fixtures/my-skill.fixture.json
+```
+
+The fixture mocks tools and LLM calls by step id, so each step can be controlled independently. Edit the fixture by hand to tighten assertions or simulate failure cases. See [`test/fixtures/open-pr.fixture.json`](./test/fixtures/open-pr.fixture.json) for a reference example.
+
+**Common failure patterns**
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `validate` reports unknown step reference | A `next`, `fallback`, or `branch` target doesn't match any step id | Check step ids for typos |
+| `dryrun` shows wrong resolved value | Expression references wrong step id or field name | Check `steps.<id>.<field>` spelling |
+| Step halts with schema mismatch | Tool or LLM output doesn't match the declared `out` / `schema` | Relax the schema or fix the tool call |
+| `cli` step exits non-zero | Shell command failed | Add `allow_failure: true` to capture it, or fix the command |
+| Import error stops validation | Referenced block file is missing or has a parse error | Fix the import path or the imported file first |
 
 ---
 

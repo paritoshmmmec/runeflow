@@ -952,7 +952,8 @@ output {
   const validation = validateRuneflow(parsed, { sourcePath: "/mock/main.runeflow.md" });
   assert.equal(validation.valid, false);
   assert.ok(validation.issues.some((i) => i.includes("Imported file not found")));
-  assert.ok(validation.issues.some((i) => i.includes("Unknown block 'hello_template'")));
+  // Cascading "Unknown block" noise should be suppressed when the root cause is a missing import
+  assert.ok(!validation.issues.some((i) => i.includes("Unknown block 'hello_template'")));
 });
 
 test("validateRuneflow accepts parallel llm and cli children", () => {

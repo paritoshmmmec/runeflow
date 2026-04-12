@@ -297,6 +297,12 @@ export function validateSkill(definition, options = {}) {
 
   const importedBlocks = loadImportedBlocks(definition.workflow?.imports ?? [], effectiveOptions, new Set(), issues);
 
+  // If imports failed, stop here — continuing would produce misleading "unknown block"
+  // errors for every step that references the unresolved blocks.
+  if (issues.length > 0) {
+    return { valid: false, issues: [...new Set(issues)], warnings };
+  }
+
   let workflow;
   try {
     workflow = resolveWorkflowBlocks(definition.workflow ?? { steps: [], output: {} }, importedBlocks);

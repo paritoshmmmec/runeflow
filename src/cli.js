@@ -67,7 +67,13 @@ async function loadInput(rawInput) {
     return JSON.parse(await fs.readFile(filePath, "utf8"));
   }
 
-  return JSON.parse(rawInput);
+  try {
+    return JSON.parse(rawInput);
+  } catch (error) {
+    throw new Error(
+      `Invalid --input JSON: ${error.message}\nTip: use --input @inputs.json to load from a file instead.`,
+    );
+  }
 }
 
 async function loadRunArtifact(runId, runsDir, fallbackRunsDir = null) {
@@ -323,6 +329,18 @@ export async function runCli(argv) {
   if (command === "run") {
     const target = positional[0];
     const { run, definition } = await executeRun(target, options);
+
+    const skillName = definition.metadata?.name ?? target;
+    const duration = Date.parse(run.finished_at) - Date.parse(run.started_at);
+    if (run.status === "success") {
+      process.stderr.write(`✓  ${skillName}  success  (${run.steps.length} steps, ${duration}ms)\n`);
+    } else {
+      process.stderr.write(`✗  ${skillName}  halted at step '${run.halted_step_id}': ${run.error?.message ?? "unknown error"}\n`);
+      if (run.status === "halted_on_error") {
+        process.stderr.write(`Tip: run 'runeflow dryrun ${target} --input ...' first to preview execution without making tool or LLM calls.\n`);
+      }
+    }
+
     console.log(JSON.stringify(run, null, 2));
 
     if (options["record-fixture"]) {
@@ -469,6 +487,9 @@ export async function runCli(argv) {
 
     if (format === "table") {
       // Compact step timeline
+      const haltedStepId = artifact.status === "halted_on_error" ? artifact.halted_step_id : null;
+      const haltedErrorMsg = artifact.error?.message ?? null;
+
       const rows = (artifact.steps ?? []).map((step) => {
         const startMs = step.started_at ? Date.parse(step.started_at) : null;
         const endMs = step.finished_at ? Date.parse(step.finished_at) : null;
@@ -476,11 +497,16 @@ export async function runCli(argv) {
         const tokens = step.token_usage
           ? `${step.token_usage.prompt_tokens ?? 0}p/${step.token_usage.completion_tokens ?? 0}c`
           : "";
-        const statusDisplay = step.status === "failed" ? `✗ ${step.status}` : step.status === "success" ? `✓ ${step.status}` : step.status;
+        const isFailed = step.status === "failed";
+        const statusDisplay = isFailed ? `✗ ${step.status}` : step.status === "success" ? `✓ ${step.status}` : step.status;
+        // Surface the error inline on the failed step row so it's visible immediately
+        const errorHint = isFailed && step.id === haltedStepId && haltedErrorMsg
+          ? `  ← ${haltedErrorMsg.split("\n")[0].slice(0, 80)}`
+          : "";
         return {
           id: step.id,
           kind: step.kind,
-          status: statusDisplay,
+          status: statusDisplay + errorHint,
           duration: durationMs !== null ? `${durationMs}ms` : "-",
           attempts: step.attempts ?? 1,
           tokens,
@@ -501,12 +527,6 @@ export async function runCli(argv) {
         console.log(cols.map((col, i) => String(row[col] ?? "").padEnd(widths[i])).join("  "));
       }
       console.log(divider);
-      if (artifact.status === "halted_on_error" && artifact.halted_step_id) {
-        console.log(`Failed step: ${artifact.halted_step_id}`);
-      }
-      if (artifact.error) {
-        console.log(`Error: ${artifact.error.message}`);
-      }
       return;
     }
 
