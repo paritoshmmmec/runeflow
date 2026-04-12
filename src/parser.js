@@ -420,7 +420,20 @@ export function parseSkill(source, options = {}) {
     }
   }
 
-  const rawWorkflow = parseWorkflow(mergedWorkflowSource);
+  const rawWorkflow = (() => {
+    try {
+      return parseWorkflow(mergedWorkflowSource);
+    } catch (err) {
+      if (err instanceof SkillSyntaxError && err.line != null && !err.source) {
+        throw new SkillSyntaxError(err.message.split("\n")[0], {
+          line: err.line,
+          source: mergedWorkflowSource,
+          hint: err.hint ?? undefined,
+        });
+      }
+      throw err;
+    }
+  })();
   const workflow = rawWorkflow.imports?.length > 0
     ? rawWorkflow
     : resolveWorkflowBlocks(rawWorkflow);

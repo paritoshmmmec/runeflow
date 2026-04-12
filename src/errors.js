@@ -8,13 +8,14 @@ export class SkillSyntaxError extends Error {
     if (source) {
       const lines = source.split("\n");
       const lineIndex = (line ?? 1) - 1;
-      const snippet = lines.slice(Math.max(0, lineIndex - 1), lineIndex + 2);
+      const startIndex = Math.max(0, lineIndex - 1);
+      const snippet = lines.slice(startIndex, lineIndex + 2);
       const pointer = snippet.map((l, i) => {
-        const num = (lineIndex - 1 + i + 1).toString().padStart(3);
-        const marker = i === (lineIndex > 0 ? 1 : 0) ? ">" : " ";
+        const num = (startIndex + i + 1).toString().padStart(3);
+        const marker = (startIndex + i) === lineIndex ? ">" : " ";
         return `  ${marker} ${num} | ${l}`;
       }).join("\n");
-      full += `\n${snippet.length ? snippet[0] && "\n" + pointer : ""}`;
+      full += `\n${snippet.length ? "\n" + pointer : ""}`;
     }
     if (hint) {
       full += `\n  hint: ${hint}`;
@@ -23,6 +24,7 @@ export class SkillSyntaxError extends Error {
     this.name = "SkillSyntaxError";
     this.line = line ?? null;
     this.hint = hint ?? null;
+    this.source = source ?? null;
   }
 }
 
