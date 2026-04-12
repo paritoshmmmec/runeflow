@@ -79,6 +79,12 @@ async function loadRuntime(relPath) {
  * Build a mock runtime from a fixture's mocks block.
  * Tool mocks keyed by step id; the harness maps them to the actual tool name
  * by inspecting the skill definition's steps.
+ *
+ * NOTE: Multiple steps can share the same underlying tool (e.g. two steps both
+ * calling slack.post_message). To support differentiated return values, mocks
+ * are dispatched by step id at call time rather than collapsed to tool name.
+ * The mock value may also be a function (inputs, step) => output for dynamic
+ * responses.
  */
 function buildMockRuntime(fixture, liveRuntime, definition) {
   const toolMocks = fixture.mocks?.tools ?? {};
@@ -91,12 +97,29 @@ function buildMockRuntime(fixture, liveRuntime, definition) {
       .map((s) => [s.id, s.tool]),
   );
 
-  // Register mocks under the actual tool name (looked up via step id)
-  // Also accept direct tool-name keys as a fallback
-  const toolOverrides = {};
+  // Build a tool-name → [{ stepId, output }] map so we can dispatch by step id
+  // at call time. Accepts direct tool-name keys as a fallback (no step id match).
+  const toolMocksByName = new Map(); // toolName → Map<stepId|null, output|fn>
   for (const [key, output] of Object.entries(toolMocks)) {
     const toolName = stepToolMap.get(key) ?? key;
-    toolOverrides[toolName] = async () => output;
+    if (!toolMocksByName.has(toolName)) toolMocksByName.set(toolName, new Map());
+    // key is a step id if it appears in stepToolMap, otherwise treat as tool name (null sentinel)
+    const stepId = stepToolMap.has(key) ? key : null;
+    toolMocksByName.get(toolName).set(stepId, output);
+  }
+
+  // Build per-tool mock handlers that dispatch by step id
+  const toolOverrides = {};
+  for (const [toolName, byStepId] of toolMocksByName) {
+    toolOverrides[toolName] = async (inputs, ctx) => {
+      const stepId = ctx?.step?.id ?? null;
+      // Prefer exact step-id match, then fall back to null (tool-name keyed) entry
+      const output = byStepId.has(stepId) ? byStepId.get(stepId) : byStepId.get(null);
+      if (output === undefined) {
+        throw new Error(`No mock found for tool '${toolName}' step '${stepId}'.`);
+      }
+      return typeof output === "function" ? output(inputs, ctx) : output;
+    };
   }
 
   const tools = { ...(liveRuntime.tools ?? {}), ...toolOverrides };
