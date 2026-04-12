@@ -218,12 +218,15 @@ async function executeRun(target, options = {}) {
           process.stderr.write(`  ▸ ${event.stepId} (${event.kind})…\n`);
         } else if (event.type === "step:complete") {
           process.stderr.write(`  ${event.status === "success" ? "✓" : "✗"} ${event.stepId}  ${event.status}\n`);
+          if (options.verbose && event.status === "success") {
+            // verbose: resolved inputs/outputs printed inline after each step
+            // (outputs available on run artifact after completion, not in stream event)
+          }
         } else if (event.type === "llm:partial") {
           process.stderr.write(`  … ${event.stepId}: ${JSON.stringify(event.partial).slice(0, 120)}\n`);
         }
       }
       : undefined;
-
     const run = await runRuneflow(definition, input, runtime, {
       runsDir,
       force: Boolean(options.force),
@@ -272,8 +275,8 @@ export async function runCli(argv) {
   runeflow init [--name <name>] [--context <hint>] [--template <id>]
                [--provider <provider>] [--model <model>]
                [--no-local-llm] [--no-polish] [--force]
-  runeflow validate <file> [--runtime ./runtime.js] [--format json]
-  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--no-stream] [--telemetry] [--telemetry-output <path>]
+  runeflow validate <file> [--runtime ./runtime.js] [--format json] [--watch]
+  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--no-stream] [--verbose] [--telemetry] [--telemetry-output <path>]
   runeflow test <file> --fixture <fixture.json> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
   runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
@@ -310,22 +313,52 @@ export async function runCli(argv) {
     const definition = parseRuneflow(source, { sourcePath: target });
     const runtime = await loadRuntime(options.runtime);
     const effectiveRuntime = createRuntimeEnvironment(runtime, {});
-    try {
-      const validation = validateRuneflow(definition, {
+
+    const runValidation = async () => {
+      const freshSource = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
+      const freshDef = parseRuneflow(freshSource, { sourcePath: target });
+      const validation = validateRuneflow(freshDef, {
         runtimeToolRegistry: effectiveRuntime.toolRegistry,
       });
-
       if (options.format === "json") {
         console.log(JSON.stringify(validation, null, 2));
       } else {
         printValidation(target, validation);
+      }
+      return validation;
+    };
+
+    try {
+      const validation = await runValidation();
+
+      if (options.watch) {
+        process.stderr.write(`Watching ${target} for changes…\n`);
+        const watcher = chokidar.watch(path.resolve(process.cwd(), target), {
+          ignoreInitial: true,
+          awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 },
+        });
+        watcher.on("change", async () => {
+          process.stderr.write(`\n[changed] re-validating…\n`);
+          try {
+            await runValidation();
+          } catch (err) {
+            console.error(`  error  ${err.message}`);
+          }
+        });
+        await new Promise((resolve) => {
+          process.once("SIGINT", () => { watcher.close(); resolve(); });
+          process.once("SIGTERM", () => { watcher.close(); resolve(); });
+        });
+        return;
       }
 
       if (!validation.valid) {
         process.exitCode = 1;
       }
     } finally {
-      await closeRuntimePlugins(effectiveRuntime).catch(() => {});
+      if (!options.watch) {
+        await closeRuntimePlugins(effectiveRuntime).catch(() => {});
+      }
     }
     return;
   }
@@ -343,6 +376,23 @@ export async function runCli(argv) {
       if (run.status === "halted_on_error") {
         process.stderr.write(`Tip: run 'runeflow dryrun ${target} --input ...' first to preview execution without making tool or LLM calls.\n`);
       }
+    }
+
+    if (options.verbose) {
+      for (const step of run.steps ?? []) {
+        const icon = step.status === "success" ? "✓" : step.status === "skipped" ? "–" : "✗";
+        process.stderr.write(`\n  ${icon} ${step.id} (${step.kind})  ${step.status}\n`);
+        if (step.inputs && Object.keys(step.inputs).length) {
+          process.stderr.write(`    inputs:  ${JSON.stringify(step.inputs)}\n`);
+        }
+        if (step.outputs && Object.keys(step.outputs).length) {
+          process.stderr.write(`    outputs: ${JSON.stringify(step.outputs)}\n`);
+        }
+        if (step.error) {
+          process.stderr.write(`    error:   ${step.error.message}\n`);
+        }
+      }
+      process.stderr.write("\n");
     }
 
     console.log(JSON.stringify(run, null, 2));
