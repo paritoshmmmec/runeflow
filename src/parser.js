@@ -28,26 +28,41 @@ function extractFrontmatter(source) {
   };
 }
 
-function extractRuneflowBlock(markdownBody) {
+function extractRuneflowBlocks(markdownBody) {
   const matches = [...markdownBody.matchAll(/```(?:runeflow|skill)\n([\s\S]*?)\n```/g)];
-
-  if (matches.length > 1) {
-    throw new SkillSyntaxError("Only one ```runeflow fenced block is supported. Legacy ```skill blocks are also accepted.");
-  }
 
   if (matches.length === 0) {
     return {
       docs: markdownBody.trim(),
-      workflowSource: "",
+      sections: [],
     };
   }
 
-  const [match] = matches;
-  const docs = (markdownBody.slice(0, match.index) + markdownBody.slice(match.index + match[0].length)).trim();
+  // Build sections: each entry has the prose preceding the block + the block source.
+  // Global docs = all prose with the runeflow blocks stripped out.
+  const sections = [];
+  let cursor = 0;
+  let globalDocs = "";
+
+  for (const match of matches) {
+    const proseBefore = markdownBody.slice(cursor, match.index).trim();
+    globalDocs += (globalDocs && proseBefore ? "\n\n" : "") + proseBefore;
+    sections.push({
+      sectionDocs: proseBefore,
+      workflowSource: match[1].trim(),
+    });
+    cursor = match.index + match[0].length;
+  }
+
+  // Trailing prose after the last block
+  const trailingProse = markdownBody.slice(cursor).trim();
+  if (trailingProse) {
+    globalDocs += (globalDocs ? "\n\n" : "") + trailingProse;
+  }
 
   return {
-    docs,
-    workflowSource: match[1].trim(),
+    docs: globalDocs.trim(),
+    sections,
   };
 }
 
@@ -349,12 +364,39 @@ function extractDocBlocks(markdownBody) {
 
 export function parseSkill(source, options = {}) {
   const { frontmatter, remainder } = extractFrontmatter(source);
-  const { docs: rawDocs, workflowSource } = extractRuneflowBlock(remainder);
+  const { docs: rawDocs, sections } = extractRuneflowBlocks(remainder);
   const { docBlocks, cleanedBody } = extractDocBlocks(rawDocs);
-  const rawWorkflow = parseWorkflow(workflowSource);
-  // Only resolve block references eagerly when there are no cross-file imports.
-  // When imports are present, the validator handles resolution after loading the
-  // imported files.
+
+  // Merge all runeflow blocks into one workflow, tracking which section
+  // each step came from so we can scope docs projection per llm step.
+  const stepDocs = {};
+  let mergedWorkflowSource = "";
+
+  if (sections.length === 0) {
+    mergedWorkflowSource = "";
+  } else if (sections.length === 1) {
+    mergedWorkflowSource = sections[0].workflowSource;
+    // Single block — section docs are the same as global docs, no per-step override needed
+  } else {
+    // Multiple blocks: parse each independently to get step ids, then merge sources
+    for (const section of sections) {
+      if (!section.workflowSource.trim()) continue;
+      // Quick pass to extract step ids from this section
+      try {
+        const partial = parseWorkflow(section.workflowSource);
+        for (const step of partial.steps ?? []) {
+          if (section.sectionDocs) {
+            stepDocs[step.id] = section.sectionDocs;
+          }
+        }
+      } catch {
+        // If a section fails to parse, we'll catch it in the full merge below
+      }
+      mergedWorkflowSource += (mergedWorkflowSource ? "\n\n" : "") + section.workflowSource;
+    }
+  }
+
+  const rawWorkflow = parseWorkflow(mergedWorkflowSource);
   const workflow = rawWorkflow.imports?.length > 0
     ? rawWorkflow
     : resolveWorkflowBlocks(rawWorkflow);
@@ -375,6 +417,7 @@ export function parseSkill(source, options = {}) {
     consts: frontmatter.const ?? {},
     docs: cleanedBody,
     docBlocks,
+    stepDocs: Object.keys(stepDocs).length > 0 ? stepDocs : null,
     workflow,
     raw: source,
   };

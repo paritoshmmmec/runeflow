@@ -2,37 +2,47 @@
 // Replace github.* and slack.* with real clients for live runs.
 export default {
   tools: {
-    "github.count_open_prs": async ({ repo }) => {
+    "github.count_open_prs": async ({ owner, repo }) => {
       if (process.env.GITHUB_TOKEN) {
         const { Octokit } = await import("@octokit/rest");
         const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-        const [owner, repoName] = repo.split("/");
-        const { data } = await octokit.pulls.list({ owner, repo: repoName, state: "open", per_page: 1 });
-        // Use link header for total count if available, else return page length
-        return { count: data.length };
+        // Fetch up to 100 per page and follow the link header for the real total
+        const response = await octokit.pulls.list({ owner, repo, state: "open", per_page: 100 });
+        const linkHeader = response.headers?.link ?? "";
+        // If there's a "last" page link, parse its page number for the true count
+        const lastPageMatch = linkHeader.match(/[?&]page=(\d+)>;\s*rel="last"/);
+        if (lastPageMatch) {
+          // last_page * 100 overcounts slightly but is the best we can do without
+          // the search API. Use the actual data length for single-page results.
+          const lastPage = parseInt(lastPageMatch[1], 10);
+          const count = (lastPage - 1) * 100 + response.data.length;
+          return { count };
+        }
+        return { count: response.data.length };
       }
-      console.error(`[dry-run] github.count_open_prs → ${repo}`);
+      console.error(`[dry-run] github.count_open_prs → ${owner}/${repo}`);
       return { count: 0 };
     },
-    "github.list_stale_prs": async ({ repo, stale_days }) => {
+    "github.list_stale_prs": async ({ owner, repo, days_since_update }) => {
       if (process.env.GITHUB_TOKEN) {
         const { Octokit } = await import("@octokit/rest");
         const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-        const [owner, repoName] = repo.split("/");
-        const { data } = await octokit.pulls.list({ owner, repo: repoName, state: "open", per_page: 50 });
-        const cutoff = Date.now() - stale_days * 86_400_000;
-        const prs = data
-          .filter((pr) => new Date(pr.created_at).getTime() < cutoff)
+        const { data } = await octokit.pulls.list({ owner, repo, state: "open", per_page: 100 });
+        const cutoff = Date.now() - days_since_update * 86_400_000;
+        const pull_requests = data
+          .filter((pr) => new Date(pr.updated_at).getTime() < cutoff)
           .map((pr) => ({
             number: pr.number,
             title: pr.title,
+            url: pr.html_url,
             author: pr.user.login,
-            days_open: Math.floor((Date.now() - new Date(pr.created_at).getTime()) / 86_400_000),
+            updated_at: pr.updated_at,
+            days_since_update: Math.floor((Date.now() - new Date(pr.updated_at).getTime()) / 86_400_000),
           }));
-        return { prs };
+        return { pull_requests };
       }
-      console.error(`[dry-run] github.list_stale_prs → ${repo}`);
-      return { prs: [] };
+      console.error(`[dry-run] github.list_stale_prs → ${owner}/${repo}`);
+      return { pull_requests: [] };
     },
     "slack.post_message": async ({ channel, text }) => {
       if (process.env.SLACK_BOT_TOKEN) {

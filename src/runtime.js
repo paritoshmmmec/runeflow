@@ -118,9 +118,9 @@ async function invokeTool(step, resolvedInput, runtime, state) {
 }
 
 function projectLlmContext(definition, step) {
-  const docs = step.docs
-    ? (definition.docBlocks?.[step.docs] ?? definition.docs)
-    : definition.docs;
+  // Per-step section docs take priority, then named doc blocks, then global docs
+  const docs = definition.stepDocs?.[step.id]
+    ?? (step.docs ? (definition.docBlocks?.[step.docs] ?? definition.docs) : definition.docs);
   return {
     docs,
     metadata: deepClone(definition.metadata),

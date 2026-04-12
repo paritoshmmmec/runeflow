@@ -273,7 +273,9 @@ export interface RunOptions {
   cwd?: string;
   force?: boolean;
   checkAuth?: boolean;
-  priorSteps?: StepRun[];
+  /** Keyed by step id — used for cache replay and resume. */
+  priorSteps?: Record<string, StepRun>;
+  resumeFromStep?: string;
   toolRegistry?: ToolRegistryEntry[];
   promptValues?: Record<string, string>;
   promptHandler?: (stepId: string, prompt: string, choices?: string[], defaultValue?: unknown) => Promise<string>;
@@ -445,20 +447,66 @@ export function dryrunSkill(
 ): Promise<DryrunResult>;
 
 // Assembler
+export interface AssembleOptions {
+  cwd?: string;
+  format?: "markdown" | "json";
+}
+
+export interface AssembledContext {
+  skill: string;
+  step: string;
+  docs: string | null;
+  prompt: string | unknown;
+  input: Record<string, unknown>;
+  schema: SchemaValue | null;
+  pre_steps: unknown[];
+  execution: unknown;
+  notes: string[];
+}
+
 export function assembleRuneflow(
   definition: RuneflowDefinition,
   stepId: string,
   inputs?: Record<string, unknown>,
   runtime?: Runtime,
-  options?: { cwd?: string },
+  options?: AssembleOptions & { format: "json" },
+): Promise<AssembledContext>;
+export function assembleRuneflow(
+  definition: RuneflowDefinition,
+  stepId: string,
+  inputs?: Record<string, unknown>,
+  runtime?: Runtime,
+  options?: AssembleOptions & { format?: "markdown" },
+): Promise<string>;
+export function assembleRuneflow(
+  definition: RuneflowDefinition,
+  stepId: string,
+  inputs?: Record<string, unknown>,
+  runtime?: Runtime,
+  options?: AssembleOptions,
+): Promise<string | AssembledContext>;
+
+export function assembleSkill(
+  definition: RuneflowDefinition,
+  stepId: string,
+  inputs?: Record<string, unknown>,
+  runtime?: Runtime,
+  options?: AssembleOptions & { format: "json" },
+): Promise<AssembledContext>;
+export function assembleSkill(
+  definition: RuneflowDefinition,
+  stepId: string,
+  inputs?: Record<string, unknown>,
+  runtime?: Runtime,
+  options?: AssembleOptions & { format?: "markdown" },
 ): Promise<string>;
 export function assembleSkill(
   definition: RuneflowDefinition,
   stepId: string,
   inputs?: Record<string, unknown>,
   runtime?: Runtime,
-  options?: { cwd?: string },
-): Promise<string>;
+  options?: AssembleOptions,
+): Promise<string | AssembledContext>;
 
 // Importer
 export function importMarkdownRuneflow(source: string, options?: { sourcePath?: string }): string;
