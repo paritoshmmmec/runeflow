@@ -174,7 +174,7 @@ async function getGitCommits(cwd) {
 }
 
 // ---------------------------------------------------------------------------
-// Existing .runeflow.md skill parsing
+// Existing .md skill parsing
 // ---------------------------------------------------------------------------
 
 /** Extract name from YAML frontmatter between --- delimiters. */
@@ -202,7 +202,7 @@ async function readExistingSkills(cwd) {
   const skillTools = [];
 
   for (const entry of entries) {
-    if (!entry.endsWith(".runeflow.md")) continue;
+    if (!entry.endsWith(".md")) continue;
     const content = await tryRead(path.join(cwd, entry));
     if (content === null) continue;
 
@@ -266,9 +266,12 @@ async function scanClaudeSkillFiles(dir, cwd, depth, maxDepth) {
     if (entry.isDirectory()) {
       const nested = await scanClaudeSkillFiles(fullPath, cwd, depth + 1, maxDepth);
       results.push(...nested);
-    } else if (entry.isFile() && entry.name.endsWith(".md") && !entry.name.endsWith(".runeflow.md")) {
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
       const content = await tryRead(fullPath);
       if (content === null) continue;
+
+      // Skip files that are already runeflow workflows
+      if (/^runeflow:\s*true\s*$/m.test(content) || /```(?:runeflow|skill)\n/.test(content)) continue;
 
       const markers = detectClaudeMarkers(content);
       if (markers.length === 0) continue;
@@ -336,7 +339,7 @@ export async function inspectRepo(options = {}) {
   // Git commits
   const gitCommits = await getGitCommits(cwd);
 
-  // Existing .runeflow.md skills
+  // Existing .md skills
   const { skillNames: existingSkillNames, skillTools: existingSkillTools } =
     await readExistingSkills(cwd);
 

@@ -1,10 +1,10 @@
 /**
- * Runtime for release-notes.runeflow.md
+ * Runtime for release-notes.md
  *
  * Requires: CEREBRAS_API_KEY in environment (or .env file)
  *
  * Usage:
- *   node --env-file=.env ./bin/runeflow.js run ./examples/release-notes.runeflow.md \
+ *   node --env-file=.env ./bin/runeflow.js run ./examples/release-notes.md \
  *     --input '{"base_ref":"main"}' \
  *     --runtime ./examples/release-notes-runtime.js
  */

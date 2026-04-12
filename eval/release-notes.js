@@ -1,5 +1,5 @@
 /**
- * Eval harness for release-notes.runeflow.md
+ * Eval harness for release-notes.md
  *
  * Runs the runeflow skill against a fixture and reports token usage + outputs.
  *
@@ -19,7 +19,7 @@ import { runRuneflow } from "../src/runtime.js";
 
 function parseOptions(argv) {
   const options = {
-    runeflowFile: "examples/release-notes.runeflow.md",
+    runeflowFile: "examples/release-notes.md",
     runtimeFile: "eval/release-notes-runtime.js",
     fixtureFile: "eval/fixtures/release-notes.default.json",
     baseRef: null,

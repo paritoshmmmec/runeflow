@@ -1,7 +1,7 @@
 /**
  * runeflow dryrun
  *
- * Walks a .runeflow.md step-by-step, resolving all bindings and
+ * Walks a .md step-by-step, resolving all bindings and
  * expressions with the provided inputs, but executes nothing. No tool
  * calls, no LLM calls, no shell commands, no artifact writes.
  *

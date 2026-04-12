@@ -1,6 +1,5 @@
 node_modules/
-.skill-runs/
-.runeflow-runs/
+.runeflow/output/
 .env
 .vscode/
 result_*.json

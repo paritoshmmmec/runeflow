@@ -17,8 +17,7 @@ import { validateRuneflow } from "./validator.js";
 import { buildRuneflow } from "./builder.js";
 import { createDefaultRuntime } from "./default-runtime.js";
 
-const DEFAULT_RUNS_DIR = ".runeflow-runs";
-const LEGACY_RUNS_DIR = ".skill-runs";
+const DEFAULT_RUNS_DIR = ".runeflow/output";
 
 function parseOptions(argumentsList) {
   const positional = [];
@@ -76,16 +75,8 @@ async function loadInput(rawInput) {
   }
 }
 
-async function loadRunArtifact(runId, runsDir, fallbackRunsDir = null) {
-  try {
-    return await fs.readFile(path.join(runsDir, `${runId}.json`), "utf8");
-  } catch (error) {
-    if (error?.code !== "ENOENT" || !fallbackRunsDir) {
-      throw error;
-    }
-
-    return fs.readFile(path.join(fallbackRunsDir, `${runId}.json`), "utf8");
-  }
+async function loadRunArtifact(runId, runsDir) {
+  return fs.readFile(path.join(runsDir, `${runId}.json`), "utf8");
 }
 
 async function findLatestHaltedRun(skillName, runsDir) {
@@ -276,7 +267,7 @@ export async function runCli(argv) {
   runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime ./runtime.js] [--output context.md] [--format markdown|json]
   runeflow inspect-run <run-id> [--runs-dir ./${DEFAULT_RUNS_DIR}] [--step <step-id>] [--format table|json]
   runeflow build <description> [--provider <p>] [--model <m>] [--out <file>] [--runtime ./runtime.js]
-  runeflow import <file> [--output converted.runeflow.md]
+  runeflow import <file> [--output converted.md]
   runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
   runeflow tools list [--runtime ./runtime.js]
   runeflow tools inspect <tool-name> [--runtime ./runtime.js]
@@ -462,19 +453,13 @@ export async function runCli(argv) {
     const runId = positional[0];
     if (!runId) throw new Error("Usage: runeflow inspect-run <run-id> [--step <id>] [--format table|json]");
     const runsDir = path.resolve(process.cwd(), options["runs-dir"] ?? DEFAULT_RUNS_DIR);
-    const fallbackRunsDir = options["runs-dir"] ? null : path.resolve(process.cwd(), LEGACY_RUNS_DIR);
-    const raw = await loadRunArtifact(runId, runsDir, fallbackRunsDir);
+    const raw = await loadRunArtifact(runId, runsDir);
     const artifact = JSON.parse(raw);
     const format = options.format ?? "json";
 
     // --step <id>: show a single step artifact
     if (options.step) {
-      // Determine which runs dir actually holds this run (primary or legacy fallback)
-      const resolvedRunsDir =
-        fallbackRunsDir && !(await fs.access(path.join(runsDir, runId, "steps")).then(() => true).catch(() => false))
-          ? fallbackRunsDir
-          : runsDir;
-      const stepArtifactPath = path.join(resolvedRunsDir, runId, "steps", `${options.step}.json`);
+      const stepArtifactPath = path.join(runsDir, runId, "steps", `${options.step}.json`);
       let stepRaw;
       try {
         stepRaw = await fs.readFile(stepArtifactPath, "utf8");
@@ -739,29 +724,36 @@ export async function runCli(argv) {
 
   if (command === "skills") {
     const subcommand = positional[0];
-    const skillsDir = path.resolve(process.cwd(), ".runeflow", "skills");
+    const skillsDir = path.resolve(process.cwd(), "skills");
 
     if (!subcommand || subcommand === "list") {
       let entries;
       try {
         entries = await fs.readdir(skillsDir);
       } catch {
-        console.log("No skills found. Create .runeflow/skills/ and add .runeflow.md files.");
+        console.log("No skills found. Create skills/ and add .md files with runeflow: true or a ```runeflow block.");
         return;
       }
 
-      const mdFiles = entries.filter((f) => f.endsWith(".runeflow.md") || f.endsWith(".md"));
-      if (mdFiles.length === 0) {
+      const mdFiles = entries.filter((f) => f.endsWith(".md"));
+      const skillFiles = [];
+      for (const file of mdFiles) {
+        const source = await fs.readFile(path.join(skillsDir, file), "utf8").catch(() => "");
+        const hasFlag = /^runeflow:\s*true\s*$/m.test(source);
+        const hasBlock = /```(?:runeflow|skill)\n/.test(source);
+        if (hasFlag || hasBlock) skillFiles.push({ file, source });
+      }
+
+      if (skillFiles.length === 0) {
         console.log("No skills found in .runeflow/skills/");
         return;
       }
 
       const rows = [];
-      for (const file of mdFiles.sort()) {
-        const source = await fs.readFile(path.join(skillsDir, file), "utf8").catch(() => "");
+      for (const { file, source } of skillFiles.sort((a, b) => a.file.localeCompare(b.file))) {
         const nameMatch = source.match(/^name:\s*(.+)$/m);
         const descMatch = source.match(/^description:\s*(.+)$/m);
-        const name = nameMatch?.[1]?.trim() ?? path.basename(file, ".runeflow.md");
+        const name = nameMatch?.[1]?.trim() ?? path.basename(file, ".md");
         const desc = descMatch?.[1]?.trim() ?? "";
         rows.push(`  ${name.padEnd(28)} ${file.padEnd(36)} ${desc}`);
       }
@@ -773,17 +765,12 @@ export async function runCli(argv) {
       const skillName = positional[1];
       if (!skillName) throw new Error("Usage: runeflow skills run <name> [--input '{}'] [--runtime ./runtime.js]");
 
-      // Resolve by name: try <name>.runeflow.md then <name>.md
-      let skillPath = path.join(skillsDir, `${skillName}.runeflow.md`);
+      // Resolve by name: <name>.md
+      const skillPath = path.join(skillsDir, `${skillName}.md`);
       try {
         await fs.access(skillPath);
       } catch {
-        skillPath = path.join(skillsDir, `${skillName}.md`);
-        try {
-          await fs.access(skillPath);
-        } catch {
-          throw new Error(`Skill '${skillName}' not found in .runeflow/skills/`);
-        }
+        throw new Error(`Skill '${skillName}' not found in skills/`);
       }
 
       const { run } = await executeRun(skillPath, options);

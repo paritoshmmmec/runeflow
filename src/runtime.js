@@ -14,7 +14,7 @@ import { deepClone, ensureDir, isPlainObject, serializeError, deepExpandEnvVars,
 import { validateSkill, loadImportedBlocks } from "./validator.js";
 import { createTelemetryEmitter } from "./telemetry.js";
 
-const DEFAULT_RUNS_DIR = ".runeflow-runs";
+const DEFAULT_RUNS_DIR = ".runeflow/output";
 const DEFAULT_PARALLEL_OUTPUT_SCHEMA = {
   results: ["any"],
   by_step: "object",

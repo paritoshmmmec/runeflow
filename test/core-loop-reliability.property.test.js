@@ -583,7 +583,7 @@ output {
 }
 \`\`\`
 `;
-  await fs.writeFile(path.join(tempDir, "skill.runeflow.md"), skillSource);
+  await fs.writeFile(path.join(tempDir, "skill.md"), skillSource);
 
   // Write a passing fixture
   const fixture = {
@@ -606,7 +606,7 @@ output {
 
     for (const fixtureName of ["fixture.json", "failing-fixture.json"]) {
       const output = await captureStdout(() =>
-        runCli(["test", "skill.runeflow.md", "--fixture", fixtureName]).catch(() => {}),
+        runCli(["test", "skill.md", "--fixture", fixtureName]).catch(() => {}),
       );
       const parsed = JSON.parse(output);
       assert.ok("pass" in parsed, `Output missing 'pass' field for ${fixtureName}`);
@@ -647,7 +647,7 @@ output {
 }
 \`\`\`
 `;
-        const skillPath = path.join(tempDir, "skill.runeflow.md");
+        const skillPath = path.join(tempDir, "skill.md");
         await fs.writeFile(skillPath, skillSource);
 
         const runtimeSource = `export const tools = {
@@ -664,7 +664,7 @@ output {
           await captureStdout(() =>
             runCli([
               "run",
-              "skill.runeflow.md",
+              "skill.md",
               "--input", "{}",
               "--runtime", "runtime.js",
               "--record-fixture", "recorded.json",

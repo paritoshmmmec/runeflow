@@ -9,7 +9,7 @@
  * Redirect with --telemetry-output <path> to write to a file instead.
  *
  * Plugs into any OTel collector via file tail or pipe:
- *   runeflow run ./workflow.runeflow.md --telemetry 2>spans.jsonl
+ *   runeflow run ./workflow.md --telemetry 2>spans.jsonl
  */
 
 import crypto from "node:crypto";

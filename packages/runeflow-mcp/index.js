@@ -15,7 +15,7 @@
  *   }
  *
  * Then in Claude Code or Cursor:
- *   "Use runeflow_run to run ./draft-pr.runeflow.md with inputs {\"base_branch\": \"main\"}"
+ *   "Use runeflow_run to run ./draft-pr.md with inputs {\"base_branch\": \"main\"}"
  */
 
 import fs from "node:fs/promises";
@@ -47,12 +47,12 @@ server.registerTool(
   "runeflow_run",
   {
     description:
-      "Run a .runeflow.md skill file end-to-end. The Runeflow runtime owns sequencing, " +
+      "Run a .md skill file end-to-end. The Runeflow runtime owns sequencing, " +
       "retries, tool calls, and schema validation. Returns structured JSON outputs and a " +
       "run_id you can inspect with `runeflow inspect-run <run_id>`.",
     inputSchema: {
       skill_path: z.string().describe(
-        "Path to the .runeflow.md skill file, relative to cwd or absolute.",
+        "Path to the .md skill file, relative to cwd or absolute.",
       ),
       inputs: z.record(z.any()).optional().describe(
         "Input values for the skill. Must match the skill's declared inputs schema.",
@@ -125,10 +125,10 @@ server.registerTool(
   "runeflow_validate",
   {
     description:
-      "Validate a .runeflow.md skill file without running it. Checks references, schemas, " +
+      "Validate a .md skill file without running it. Checks references, schemas, " +
       "and step wiring. Returns { valid, issues, warnings }.",
     inputSchema: {
-      skill_path: z.string().describe("Path to the .runeflow.md skill file."),
+      skill_path: z.string().describe("Path to the .md skill file."),
     },
   },
   async ({ skill_path }) => {

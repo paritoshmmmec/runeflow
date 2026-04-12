@@ -25,9 +25,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md",
-    "validate:block-demo": "node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md",
-    "validate:release-notes": "node ./bin/runeflow.js validate ./examples/release-notes.runeflow.md",
+    "validate:example": "node ./bin/runeflow.js validate ./examples/open-pr.md",
+    "validate:block-demo": "node ./bin/runeflow.js validate ./examples/block-demo.md",
+    "validate:release-notes": "node ./bin/runeflow.js validate ./examples/release-notes.md",
     "eval:open-pr": "node --env-file=.env ./eval/open-pr.js --base-branch main",
     "eval:3p": "node --env-file=.env ./eval/3p-updates.js",
     "eval:addresszen": "node --env-file=.env ./eval/addresszen-automation.js --delay-ms 5000",

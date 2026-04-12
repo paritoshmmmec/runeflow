@@ -6,7 +6,7 @@
  * Markdown context file.
  *
  * The output is designed to be loaded by an agent (Claude Code, Codex, Cursor)
- * instead of the raw .runeflow.md. The agent sees only what it needs for one step:
+ * instead of the raw .md. The agent sees only what it needs for one step:
  * the relevant docs, the resolved prompt, the resolved input, and the output schema.
  *
  * Zero changes to runtime.js — this is purely additive.

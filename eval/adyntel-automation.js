@@ -10,7 +10,7 @@ import { validateShape } from "../src/schema.js";
 function parseOptions(argv) {
   const options = {
     rawFile: "eval/adyntel-automation.raw.md",
-    runeflowFile: "eval/adyntel-automation.runeflow.md",
+    runeflowFile: "eval/adyntel-automation.md",
     runtimeFile: "eval/adyntel-runtime.js",
     fixtureFile: "eval/fixtures/adyntel-automation.default.json",
     taskQuery: "Update john doe lead",

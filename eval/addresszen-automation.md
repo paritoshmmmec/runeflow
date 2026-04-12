@@ -1,91 +1,50 @@
 ---
 name: addresszen-automation
-description: "Automate Addresszen tasks via Rube MCP (Composio). Always search tools first for current schemas."
-requires:
-  mcp: [rube]
+description: Runeflow baseline for Addresszen automation.
+version: 0.1
+inputs:
+  task_query: string
+outputs:
+  status: string
+  action_taken: string
+llm:
+  provider: cerebras
+  router: false
+  model: qwen-3-235b-a22b-instruct-2507
 ---
 
-# Addresszen Automation via Rube MCP
+# Addresszen Automation
 
-Automate Addresszen operations through Composio's Addresszen toolkit via Rube MCP.
+Instead of forcing the LLM to search for tools dynamically, the runtime handles connection verification and passes the explicit MCP operation payloads.
 
-**Toolkit docs**: [composio.dev/toolkits/addresszen](https://composio.dev/toolkits/addresszen)
+```runeflow
+step check_connection type=tool {
+  tool: rube.manage_connections
+  with: { toolkits: ["addresszen"] }
+  out: { status: string, auth_link: string }
+  next: check_auth
+}
 
-## Prerequisites
+branch check_auth {
+  if: steps.check_connection.status != "ACTIVE"
+  then: fail_unauth
+  else: addresszen_task
+}
 
-- Rube MCP must be connected (RUBE_SEARCH_TOOLS available)
-- Active Addresszen connection via `RUBE_MANAGE_CONNECTIONS` with toolkit `addresszen`
-- Always call `RUBE_SEARCH_TOOLS` first to get current tool schemas
+step fail_unauth type=tool {
+  tool: util.fail
+  with: { message: "Authentication required. Please visit {{ steps.check_connection.auth_link }}" }
+  out: { message: string }
+}
 
-## Setup
+step addresszen_task type=llm {
+  prompt: "Determine the required operation for: {{ inputs.task_query }}"
+  input: { task_query: inputs.task_query }
+  schema: { status: string, action_taken: string }
+}
 
-**Get Rube MCP**: Add `https://rube.app/mcp` as an MCP server in your client configuration. No API keys needed — just add the endpoint and it works.
-
-1. Verify Rube MCP is available by confirming `RUBE_SEARCH_TOOLS` responds
-2. Call `RUBE_MANAGE_CONNECTIONS` with toolkit `addresszen`
-3. If connection is not ACTIVE, follow the returned auth link to complete setup
-4. Confirm connection status shows ACTIVE before running any workflows
-
-## Tool Discovery
-
-Always discover available tools before executing workflows:
-
+output {
+  status: steps.addresszen_task.status
+  action_taken: steps.addresszen_task.action_taken
+}
 ```
-RUBE_SEARCH_TOOLS
-queries: [{use_case: "Addresszen operations", known_fields: ""}]
-session: {generate_id: true}
-```
-
-This returns available tool slugs, input schemas, recommended execution plans, and known pitfalls.
-
-## Core Workflow Pattern
-
-### Step 1: Discover Available Tools
-
-```
-RUBE_SEARCH_TOOLS
-queries: [{use_case: "your specific Addresszen task"}]
-session: {id: "existing_session_id"}
-```
-
-### Step 2: Check Connection
-
-```
-RUBE_MANAGE_CONNECTIONS
-toolkits: ["addresszen"]
-session_id: "your_session_id"
-```
-
-### Step 3: Execute Tools
-
-```
-RUBE_MULTI_EXECUTE_TOOL
-tools: [{
-  tool_slug: "TOOL_SLUG_FROM_SEARCH",
-  arguments: {/* schema-compliant args from search results */}
-}]
-memory: {}
-session_id: "your_session_id"
-```
-
-## Known Pitfalls
-
-- **Always search first**: Tool schemas change. Never hardcode tool slugs or arguments without calling `RUBE_SEARCH_TOOLS`
-- **Check connection**: Verify `RUBE_MANAGE_CONNECTIONS` shows ACTIVE status before executing tools
-- **Schema compliance**: Use exact field names and types from the search results
-- **Memory parameter**: Always include `memory` in `RUBE_MULTI_EXECUTE_TOOL` calls, even if empty (`{}`)
-- **Session reuse**: Reuse session IDs within a workflow. Generate new ones for new workflows
-- **Pagination**: Check responses for pagination tokens and continue fetching until complete
-
-## Quick Reference
-
-| Operation | Approach |
-|-----------|----------|
-| Find tools | `RUBE_SEARCH_TOOLS` with Addresszen-specific use case |
-| Connect | `RUBE_MANAGE_CONNECTIONS` with toolkit `addresszen` |
-| Execute | `RUBE_MULTI_EXECUTE_TOOL` with discovered tool slugs |
-| Bulk ops | `RUBE_REMOTE_WORKBENCH` with `run_composio_tool()` |
-| Full schema | `RUBE_GET_TOOL_SCHEMAS` for tools with `schemaRef` |
-
----
-*Powered by [Composio](https://composio.dev)*

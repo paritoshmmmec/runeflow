@@ -10,7 +10,7 @@ import { validateShape } from "../src/schema.js";
 function parseOptions(argv) {
   const options = {
     rawFile: "eval/3p-updates.raw.md",
-    runeflowFile: "eval/3p-updates.runeflow.md",
+    runeflowFile: "eval/3p-updates.md",
     runtimeFile: "eval/3p-runtime.js",
     fixtureFile: "eval/fixtures/3p-updates.default.json",
     teamName: null,

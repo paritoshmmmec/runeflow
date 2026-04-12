@@ -1,5 +1,5 @@
 {
-  "_comment": "Fixture for examples/open-pr.runeflow.md. Run with: runeflow test examples/open-pr.runeflow.md --fixture test/fixtures/open-pr.fixture.json",
+  "_comment": "Fixture for examples/open-pr.md. Run with: runeflow test examples/open-pr.md --fixture test/fixtures/open-pr.fixture.json",
   "inputs": {
     "base_branch": "main"
   },

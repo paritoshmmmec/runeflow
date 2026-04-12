@@ -61,10 +61,10 @@ test("Property 1: Signal set always contains required fields for any combination
             );
           }
 
-          // Optionally write a minimal .runeflow.md skill file
+          // Optionally write a minimal .md skill file
           if (hasRuneflowMd) {
             await fs.writeFile(
-              path.join(tempDir, "test.runeflow.md"),
+              path.join(tempDir, "test.md"),
               "---\nname: test-skill\ndescription: A test skill\nversion: 0.1\ninputs: {}\noutputs:\n  result: string\n---\n\n# Test Skill\n",
               "utf8",
             );

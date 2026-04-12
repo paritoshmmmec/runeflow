@@ -10,7 +10,7 @@ import { validateShape } from "../src/schema.js";
 function parseOptions(argv) {
   const options = {
     rawFile: "eval/addresszen-automation.raw.md",
-    runeflowFile: "eval/addresszen-automation.runeflow.md",
+    runeflowFile: "eval/addresszen-automation.md",
     runtimeFile: "eval/addresszen-runtime.js",
     fixtureFile: "eval/fixtures/addresszen-automation.default.json",
     taskQuery: null,

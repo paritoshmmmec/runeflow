@@ -89,13 +89,13 @@ test("detects .md files containing <system> block as claude skill files", async 
   }
 });
 
-// 6. Claude skill file detection — ignores .runeflow.md files
-test("ignores .runeflow.md files when scanning for claude skill files", async () => {
+// 6. Claude skill file detection — ignores runeflow workflow files
+test("ignores runeflow workflow files when scanning for claude skill files", async () => {
   const dir = await makeTmpDir();
   try {
     await fs.writeFile(
-      path.join(dir, "my-skill.runeflow.md"),
-      "# My Skill\n\n<system>\nYou are a helpful assistant.\n</system>\n",
+      path.join(dir, "my-skill.md"),
+      "---\nruneflow: true\n---\n\n# My Skill\n\n<system>\nYou are a helpful assistant.\n</system>\n",
     );
     const result = await inspectRepo({ cwd: dir });
     assert.equal(result.claudeSkillFiles.length, 0);
@@ -104,12 +104,12 @@ test("ignores .runeflow.md files when scanning for claude skill files", async ()
   }
 });
 
-// 7. Existing .runeflow.md skill names are extracted
-test("extracts skill names from .runeflow.md frontmatter", async () => {
+// 7. Existing .md skill names are extracted
+test("extracts skill names from .md frontmatter", async () => {
   const dir = await makeTmpDir();
   try {
     await fs.writeFile(
-      path.join(dir, "my-skill.runeflow.md"),
+      path.join(dir, "my-skill.md"),
       "---\nname: my-skill\ndescription: A test skill\n---\n\n# My Skill\n",
     );
     const result = await inspectRepo({ cwd: dir });
@@ -119,12 +119,12 @@ test("extracts skill names from .runeflow.md frontmatter", async () => {
   }
 });
 
-// 8. Existing .runeflow.md tool names are extracted
-test("extracts tool names from .runeflow.md content", async () => {
+// 8. Existing .md tool names are extracted
+test("extracts tool names from .md content", async () => {
   const dir = await makeTmpDir();
   try {
     await fs.writeFile(
-      path.join(dir, "push.runeflow.md"),
+      path.join(dir, "push.md"),
       "---\nname: push\ndescription: Push skill\n---\n\n```runeflow\nstep push type=tool {\n  tool: git.push_current_branch\n  out: { ok: boolean }\n}\noutput {}\n```\n",
     );
     const result = await inspectRepo({ cwd: dir });

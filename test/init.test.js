@@ -22,7 +22,7 @@ async function makeTmpDir() {
 // Generation_Mode is entered when no Claude skill files are found
 // ---------------------------------------------------------------------------
 
-test("Generation_Mode: writes a .runeflow.md and runtime.js to cwd", async () => {
+test("Generation_Mode: writes a .md and runtime.js to cwd", async () => {
   const dir = await makeTmpDir();
   try {
     await runInit({
@@ -35,8 +35,8 @@ test("Generation_Mode: writes a .runeflow.md and runtime.js to cwd", async () =>
     });
 
     const entries = await fs.readdir(dir);
-    const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
-    assert.ok(skillFiles.length >= 1, "Should write at least one .runeflow.md file");
+    const skillFiles = entries.filter((f) => f.endsWith(".md"));
+    assert.ok(skillFiles.length >= 1, "Should write at least one .md file");
 
     // Validate the generated skill
     const content = await fs.readFile(path.join(dir, skillFiles[0]), "utf8");
@@ -69,11 +69,12 @@ test("Conversion_Mode: converts a Claude skill file when one is present", async 
       noLocalLlm: true,
       noPolish: true,
       silent: true,
+      force: true, // input and output are both .md now, so force overwrite
     });
 
     const entries = await fs.readdir(dir);
-    const converted = entries.filter((f) => f.endsWith(".runeflow.md"));
-    assert.ok(converted.length >= 1, "Should write at least one converted .runeflow.md");
+    const converted = entries.filter((f) => f.endsWith(".md"));
+    assert.ok(converted.length >= 1, "Should write at least one converted .md");
 
     // Validate the converted skill
     const content = await fs.readFile(path.join(dir, converted[0]), "utf8");
@@ -89,7 +90,7 @@ test("Conversion_Mode: converts a Claude skill file when one is present", async 
 // --force overwrites existing files
 // ---------------------------------------------------------------------------
 
-test("--force overwrites existing .runeflow.md", async () => {
+test("--force overwrites existing .md", async () => {
   const dir = await makeTmpDir();
   try {
     // First run
@@ -103,7 +104,7 @@ test("--force overwrites existing .runeflow.md", async () => {
       name: "my-skill",
     });
 
-    const skillPath = path.join(dir, "my-skill.runeflow.md");
+    const skillPath = path.join(dir, "my-skill.md");
     assert.ok(await fs.access(skillPath).then(() => true).catch(() => false), "Skill file should exist after first run");
 
     // Write a sentinel to the file
@@ -209,7 +210,7 @@ test("--no-local-llm writes runtime.js with placeholder provider", async () => {
 
     // The generated skill should still be valid
     const entries = await fs.readdir(dir);
-    const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
+    const skillFiles = entries.filter((f) => f.endsWith(".md"));
     assert.ok(skillFiles.length >= 1, "Should write at least one skill file");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -234,7 +235,7 @@ test("non-interactive mode (no TTY) completes without hanging", async () => {
     });
 
     const entries = await fs.readdir(dir);
-    const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
+    const skillFiles = entries.filter((f) => f.endsWith(".md"));
     assert.ok(skillFiles.length >= 1, "Should write skill file in non-interactive mode");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -259,7 +260,7 @@ test("--template forces use of the named template", async () => {
     });
 
     const entries = await fs.readdir(dir);
-    const skillFiles = entries.filter((f) => f.endsWith(".runeflow.md"));
+    const skillFiles = entries.filter((f) => f.endsWith(".md"));
     assert.ok(skillFiles.length >= 1, "Should write skill file");
 
     // The generated skill should contain Slack-related content
@@ -287,7 +288,7 @@ test("--name overrides the skill filename", async () => {
       name: "custom-skill-name",
     });
 
-    const skillPath = path.join(dir, "custom-skill-name.runeflow.md");
+    const skillPath = path.join(dir, "custom-skill-name.md");
     const exists = await fs.access(skillPath).then(() => true).catch(() => false);
     assert.ok(exists, "Should write skill file with custom name");
   } finally {

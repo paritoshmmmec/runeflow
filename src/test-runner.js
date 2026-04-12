@@ -1,7 +1,7 @@
 /**
  * runeflow test
  *
- * Runs a .runeflow.md against a fixture file. Mocks all LLM and tool calls using
+ * Runs a .md against a fixture file. Mocks all LLM and tool calls using
  * the fixture's `mocks` section. Asserts status, outputs, and per-step
  * outcomes against the `expect` section.
  *
@@ -276,7 +276,7 @@ export async function runTest(definition, fixture, options = {}) {
       path: "run",
       expected: { status: fixture.expect?.status ?? "success" },
       actual: { error: runError.message },
-      message: `.runeflow.md threw an unexpected error: ${runError.message}`,
+      message: `.md threw an unexpected error: ${runError.message}`,
     };
     return {
       pass: false,

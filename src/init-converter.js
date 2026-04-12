@@ -247,7 +247,7 @@ function buildFallbackSkeleton(source, skillName, slug, description, sourcePath,
 }
 
 /**
- * Convert a Claude-style Markdown skill file into a .runeflow.md string.
+ * Convert a Claude-style Markdown skill file into a .md string.
  *
  * @param {string} source        - raw Markdown content of the Claude skill file
  * @param {object} options

@@ -2365,7 +2365,7 @@ test("runRuneflow resolves cross-file imported blocks at runtime", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-import-runs-"));
 
   // Write the shared block library
-  const libPath = path.join(tmpdir, "lib.runeflow.md");
+  const libPath = path.join(tmpdir, "lib.md");
   await fs.writeFile(libPath, `---
 name: lib
 description: Shared block library
@@ -2383,7 +2383,7 @@ block greet type=llm {
 `);
 
   // Write the main workflow that imports from the library
-  const mainPath = path.join(tmpdir, "main.runeflow.md");
+  const mainPath = path.join(tmpdir, "main.md");
   await fs.writeFile(mainPath, `---
 name: import-runtime-demo
 description: Uses a block imported from another file
@@ -2399,7 +2399,7 @@ llm:
 ---
 
 \`\`\`runeflow
-import blocks from "./lib.runeflow.md"
+import blocks from "./lib.md"
 
 step say_hello type=block {
   block: greet

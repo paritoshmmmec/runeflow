@@ -13,7 +13,7 @@ function parseOptions(argv) {
     cwd: process.cwd(),
     baseBranch: "main",
     rawFile: "eval/open-pr.raw.md",
-    runeflowFile: "examples/open-pr.runeflow.md",
+    runeflowFile: "examples/open-pr.md",
     runtimeFile: "eval/mock-runtime.js",
     mode: "both",
     delayMs: 0,
