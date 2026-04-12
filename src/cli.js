@@ -212,6 +212,18 @@ async function executeRun(target, options = {}) {
     : createPromptSession();
 
   try {
+    const onStream = !options["no-stream"]
+      ? (event) => {
+        if (event.type === "step:start") {
+          process.stderr.write(`  ▸ ${event.stepId} (${event.kind})…\n`);
+        } else if (event.type === "step:complete") {
+          process.stderr.write(`  ${event.status === "success" ? "✓" : "✗"} ${event.stepId}  ${event.status}\n`);
+        } else if (event.type === "llm:partial") {
+          process.stderr.write(`  … ${event.stepId}: ${JSON.stringify(event.partial).slice(0, 120)}\n`);
+        }
+      }
+      : undefined;
+
     const run = await runRuneflow(definition, input, runtime, {
       runsDir,
       force: Boolean(options.force),
@@ -219,6 +231,7 @@ async function executeRun(target, options = {}) {
       promptHandler: promptSession.promptHandler,
       telemetry: Boolean(options.telemetry),
       telemetryOutput: options["telemetry-output"],
+      onStream,
     });
 
     return { definition, run, runsDir };
@@ -260,7 +273,7 @@ export async function runCli(argv) {
                [--provider <provider>] [--model <model>]
                [--no-local-llm] [--no-polish] [--force]
   runeflow validate <file> [--runtime ./runtime.js] [--format json]
-  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--telemetry] [--telemetry-output <path>]
+  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--no-stream] [--telemetry] [--telemetry-output <path>]
   runeflow test <file> --fixture <fixture.json> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
   runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]
@@ -319,7 +332,7 @@ export async function runCli(argv) {
 
   if (command === "run") {
     const target = positional[0];
-    const { run, definition } = await executeRun(target, options);
+    const { run, definition, runsDir } = await executeRun(target, options);
 
     const skillName = definition.metadata?.name ?? target;
     const duration = Date.parse(run.finished_at) - Date.parse(run.started_at);
@@ -724,7 +737,7 @@ export async function runCli(argv) {
 
   if (command === "skills") {
     const subcommand = positional[0];
-    const skillsDir = path.resolve(process.cwd(), "skills");
+    const skillsDir = path.resolve(process.cwd(), ".runeflow/skills");
 
     if (!subcommand || subcommand === "list") {
       let entries;

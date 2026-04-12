@@ -22,7 +22,7 @@
  *   await runRuneflow(definition, inputs, runtime, options);
  */
 
-import { generateObject } from "ai";
+import { generateObject, streamObject } from "ai";
 import { z } from "zod";
 import { resolveApiKey } from "./auth.js";
 import { isPlainObject } from "./utils.js";
@@ -203,7 +203,7 @@ function buildPrompt({ prompt, input, docs }) {
 
 // ─── Core handler ─────────────────────────────────────────────────────────────
 
-async function handleLlmStep({ llm, prompt, input, docs, schema, step }) {
+async function handleLlmStep({ llm, prompt, input, docs, schema, step, onPartialObject }) {
   const provider = llm?.provider;
   if (!provider) {
     throw new Error(`Step '${step.id}' has no llm.provider configured.`);
@@ -212,6 +212,20 @@ async function handleLlmStep({ llm, prompt, input, docs, schema, step }) {
   const model = await loadModel(provider, llm, step.id);
   const zodSchema = runeflowSchemaToZod(schema ?? {});
   const fullPrompt = buildPrompt({ prompt, input, docs });
+
+  if (typeof onPartialObject === "function") {
+    const result = streamObject({
+      model,
+      schema: zodSchema,
+      prompt: fullPrompt,
+    });
+
+    for await (const partial of result.partialObjectStream) {
+      onPartialObject({ stepId: step.id, partial });
+    }
+
+    return (await result.object);
+  }
 
   const { object } = await generateObject({
     model,

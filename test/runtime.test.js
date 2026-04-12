@@ -353,7 +353,12 @@ output {
   const run = await runRuneflow(parsed, { use_primary: true }, runtime, { runsDir });
 
   assert.equal(run.status, "success");
-  assert.deepEqual(run.steps.map((step) => step.id), ["choose", "primary", "finish"]);
+  // untaken arm (secondary) is injected as skipped
+  const stepIds = run.steps.map((step) => step.id);
+  assert.ok(stepIds.includes("choose"));
+  assert.ok(stepIds.includes("primary"));
+  assert.ok(stepIds.includes("finish"));
+  assert.equal(run.steps.find((s) => s.id === "secondary").status, "skipped");
   assert.equal(run.outputs.result, "primary-done");
 });
 
@@ -1523,11 +1528,26 @@ output {
 
   const run = await runRuneflow(parsed, { branch: "feat/my-feature" }, {}, { runsDir });
   assert.equal(run.status, "success");
-  assert.deepEqual(run.steps.map((s) => s.id), ["get_branch", "check", "feature", "finish"]);
+  const stepIds = run.steps.map((s) => s.id);
+  assert.ok(stepIds.includes("get_branch"));
+  assert.ok(stepIds.includes("check"));
+  assert.ok(stepIds.includes("feature"));
+  assert.ok(stepIds.includes("finish"));
+  // untaken arm is injected as skipped
+  assert.ok(stepIds.includes("other"));
+  assert.equal(run.steps.find((s) => s.id === "other").status, "skipped");
+  assert.equal(run.steps.find((s) => s.id === "feature").status, "success");
 
   const run2 = await runRuneflow(parsed, { branch: "main" }, {}, { runsDir });
   assert.equal(run2.status, "success");
-  assert.deepEqual(run2.steps.map((s) => s.id), ["get_branch", "check", "other", "finish"]);
+  const stepIds2 = run2.steps.map((s) => s.id);
+  assert.ok(stepIds2.includes("get_branch"));
+  assert.ok(stepIds2.includes("check"));
+  assert.ok(stepIds2.includes("other"));
+  assert.ok(stepIds2.includes("finish"));
+  assert.ok(stepIds2.includes("feature"));
+  assert.equal(run2.steps.find((s) => s.id === "feature").status, "skipped");
+  assert.equal(run2.steps.find((s) => s.id === "other").status, "success");
 });
 
 test("skip_if: step is skipped when condition is true", async () => {
@@ -2425,4 +2445,191 @@ output {
 
   assert.equal(run.status, "success");
   assert.equal(run.outputs.greeting, "Hello, Alice!");
+});
+
+// ─── Shell injection protection ───────────────────────────────────────────────
+
+test("cli step: shell-escapes interpolated values to prevent injection", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cli-escape
+description: cli shell escape test
+version: 0.1
+inputs:
+  title: string
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step echo type=cli {
+  command: "echo {{ inputs.title }}"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: steps.echo.stdout }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const malicious = "safe; echo INJECTED";
+  const run = await runRuneflow(parsed, { title: malicious }, {}, { runsDir });
+
+  assert.equal(run.status, "success");
+  const lines = run.outputs.result.trim().split("\n");
+  assert.equal(lines.length, 1, "shell injection should be prevented — output must be a single line");
+  assert.ok(run.outputs.result.includes("safe"), "original value should be preserved");
+});
+
+test("cli step: shell-escapes bare expression values", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: cli-escape-bare
+description: cli bare expression shell escape
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+---
+
+\`\`\`runeflow
+step first type=tool {
+  tool: mock.first
+  out: { value: string }
+}
+
+step echo type=cli {
+  command: "echo {{ steps.first.value }}"
+  out: { stdout: string, stderr: string, exit_code: number }
+}
+
+step finish type=tool {
+  tool: util.complete
+  with: { result: steps.echo.stdout }
+  out: { result: string }
+}
+
+output {
+  result: steps.finish.result
+}
+\`\`\`
+`);
+
+  const run = await runRuneflow(parsed, {}, {
+    tools: {
+      "mock.first": async () => ({ value: "hello$(whoami)" }),
+    },
+  }, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.ok(!run.outputs.result.includes(os.userInfo().username), "command substitution should be escaped");
+});
+
+// ─── Streaming (onStream callback) ───────────────────────────────────────────
+
+test("onStream callback receives step:start, step:complete, and run:complete events", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: stream-test
+description: streaming events test
+version: 0.1
+inputs: {}
+outputs:
+  ready: boolean
+---
+
+\`\`\`runeflow
+step first type=tool {
+  tool: mock.check
+  out: { ready: boolean }
+}
+
+output {
+  ready: steps.first.ready
+}
+\`\`\`
+`);
+
+  const events = [];
+  const run = await runRuneflow(parsed, {}, {
+    tools: {
+      "mock.check": async () => ({ ready: true }),
+    },
+  }, {
+    runsDir,
+    onStream: (event) => events.push(event),
+  });
+
+  assert.equal(run.status, "success");
+
+  const startEvents = events.filter((e) => e.type === "step:start");
+  const completeEvents = events.filter((e) => e.type === "step:complete");
+  const runCompleteEvents = events.filter((e) => e.type === "run:complete");
+
+  assert.ok(startEvents.length >= 1, "should emit at least one step:start");
+  assert.ok(completeEvents.length >= 1, "should emit at least one step:complete");
+  assert.equal(runCompleteEvents.length, 1, "should emit exactly one run:complete");
+  assert.equal(runCompleteEvents[0].status, "success");
+  assert.equal(startEvents[0].stepId, "first");
+  assert.equal(completeEvents[0].stepId, "first");
+  assert.equal(completeEvents[0].status, "success");
+});
+
+test("onStream callback receives llm:partial events when handler calls onPartialObject", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: stream-llm
+description: streaming llm partial test
+version: 0.1
+inputs: {}
+outputs:
+  title: string
+llm:
+  provider: mock
+  router: false
+  model: test
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "write a title"
+  schema: { title: string }
+}
+
+output {
+  title: steps.draft.title
+}
+\`\`\`
+`);
+
+  const events = [];
+  const run = await runRuneflow(parsed, {}, {
+    llms: {
+      mock: async ({ onPartialObject }) => {
+        if (typeof onPartialObject === "function") {
+          onPartialObject({ stepId: "draft", partial: { title: "Partial..." } });
+          onPartialObject({ stepId: "draft", partial: { title: "Full Title" } });
+        }
+        return { title: "Full Title" };
+      },
+    },
+  }, {
+    runsDir,
+    onStream: (event) => events.push(event),
+  });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.title, "Full Title");
+
+  const partialEvents = events.filter((e) => e.type === "llm:partial");
+  assert.ok(partialEvents.length >= 2, "should emit llm:partial events");
+  assert.equal(partialEvents[0].stepId, "draft");
+  assert.deepEqual(partialEvents[0].partial, { title: "Partial..." });
 });

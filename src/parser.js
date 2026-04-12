@@ -111,6 +111,14 @@ function parsePropertyValue(rawValue) {
     return null;
   }
 
+  // If the value looks like an expression containing a ternary (? ... :),
+  // YAML will misparse it as a complex mapping key. Detect this and return
+  // the raw string so the expression engine can handle it at runtime.
+  const trimmed = rawValue.trim();
+  if (/\?/.test(trimmed) && /\b(?:inputs|steps|const)\./.test(trimmed)) {
+    return trimmed;
+  }
+
   try {
     return YAML.parse(rawValue);
   } catch (error) {

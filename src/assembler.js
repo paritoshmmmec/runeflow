@@ -14,7 +14,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { RuntimeError } from "./errors.js";
-import { evaluateExpression, resolveBindings } from "./expression.js";
+import { evaluateExpression, resolveBindings, resolveShellBindings } from "./expression.js";
 import { closeRuntimePlugins, createRuntimeEnvironment } from "./runtime-plugins.js";
 import { deepClone, evalTransformExpr } from "./utils.js";
 
@@ -160,7 +160,7 @@ async function executeAssembledStep(step, state, definition, environment, option
   }
 
   if (step.kind === "cli") {
-    const resolvedCommand = resolveBindings(step.command, state);
+    const resolvedCommand = resolveShellBindings(step.command, state);
     if (typeof resolvedCommand !== "string" || !resolvedCommand.trim()) {
       throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
     }

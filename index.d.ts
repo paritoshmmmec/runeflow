@@ -198,6 +198,13 @@ export interface RuntimeState {
   consts: Record<string, unknown>;
 }
 
+/** Streaming event emitted by onStream callback. */
+export type StreamEvent =
+  | { type: "step:start"; stepId: string; kind: string; runId: string }
+  | { type: "step:complete"; stepId: string; kind: string; runId: string; status: string }
+  | { type: "llm:partial"; stepId: string; partial: Record<string, unknown> }
+  | { type: "run:complete"; runId: string; status: RunStatus };
+
 /** LLM handler function signature. */
 export type LlmHandler = (params: {
   llm: LlmConfig;
@@ -212,6 +219,7 @@ export type LlmHandler = (params: {
     metadata: Metadata;
     source_path: string | null;
   };
+  onPartialObject?: (event: { stepId: string; partial: Record<string, unknown> }) => void;
 }) => Promise<Record<string, unknown>>;
 
 /** Tool handler function signature. */
@@ -269,6 +277,7 @@ export interface RunOptions {
   toolRegistry?: ToolRegistryEntry[];
   promptValues?: Record<string, string>;
   promptHandler?: (stepId: string, prompt: string, choices?: string[], defaultValue?: unknown) => Promise<string>;
+  onStream?: (event: StreamEvent) => void;
 }
 
 export interface ValidateOptions {

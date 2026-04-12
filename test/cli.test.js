@@ -1044,7 +1044,7 @@ output {
 test("runCli skills list shows skills from skills/", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-skills-"));
   const originalCwd = process.cwd();
-  const skillsDir = path.join(tempDir, "skills");
+  const skillsDir = path.join(tempDir, ".runeflow", "skills");
 
   await fs.mkdir(skillsDir, { recursive: true });
   await fs.writeFile(
