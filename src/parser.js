@@ -103,7 +103,11 @@ function findMatchingBrace(source, openBraceIndex) {
     }
   }
 
-  throw new SkillSyntaxError("Unterminated block in skill DSL.");
+  const line = source.slice(0, openBraceIndex).split("\n").length;
+  throw new SkillSyntaxError("Unterminated block — missing closing '}'.", {
+    line,
+    hint: "Every step { ... } block needs a matching closing brace.",
+  });
 }
 
 function parseHeaderAttributes(attributeSource) {
@@ -113,7 +117,9 @@ function parseHeaderAttributes(attributeSource) {
   for (const token of tokens) {
     const [key, value] = token.split("=");
     if (!key || value === undefined) {
-      throw new SkillSyntaxError(`Invalid header attribute '${token}'.`);
+      throw new SkillSyntaxError(`Invalid header attribute '${token}'.`, {
+        hint: "Attributes must be key=value pairs, e.g. type=tool or retry=3.",
+      });
     }
     attributes[key] = value;
   }
@@ -195,15 +201,26 @@ function parseBlockProperties(blockBody) {
   return properties;
 }
 
-function parseStep(header, body) {
+function parseStep(header, body, lineHint) {
   const match = header.match(/^step\s+([A-Za-z_][A-Za-z0-9_-]*)(?:\s+(.*))?$/);
 
   if (!match) {
-    throw new SkillSyntaxError(`Invalid step declaration '${header}'.`);
+    throw new SkillSyntaxError(`Invalid step declaration '${header}'.`, {
+      line: lineHint,
+      hint: "Expected: step <id> type=<kind> { ... }  e.g. step fetch type=tool { ... }",
+    });
   }
 
   const [, id, attributesSource = ""] = match;
   const attributes = parseHeaderAttributes(attributesSource);
+
+  if (!attributes.type) {
+    throw new SkillSyntaxError(`Step '${id}' is missing a type.`, {
+      line: lineHint,
+      hint: `Add type=<kind> to the step header. Valid kinds: tool, llm, cli, transform, branch, parallel, block, human_input, fail.`,
+    });
+  }
+
   const properties = parseBlockProperties(body);
 
   const step = {
@@ -243,11 +260,14 @@ function parseBlockTemplate(header, body) {
   return block;
 }
 
-function parseBranch(header, body) {
+function parseBranch(header, body, lineHint) {
   const match = header.match(/^branch\s+([A-Za-z_][A-Za-z0-9_-]*)$/);
 
   if (!match) {
-    throw new SkillSyntaxError(`Invalid branch declaration '${header}'.`);
+    throw new SkillSyntaxError(`Invalid branch declaration '${header}'.`, {
+      line: lineHint,
+      hint: "Expected: branch <id> { if: <expr>  then: <step>  else: <step> }",
+    });
   }
 
   return {
@@ -332,11 +352,12 @@ function parseWorkflow(workflowSource) {
     const header = source.slice(index, braceIndex).trim();
     const blockEnd = findMatchingBrace(source, braceIndex);
     const body = source.slice(braceIndex + 1, blockEnd).trimEnd();
+    const lineHint = source.slice(0, index).split("\n").length;
 
     if (header.startsWith("step ")) {
-      steps.push(parseStep(header, body));
+      steps.push(parseStep(header, body, lineHint));
     } else if (header.startsWith("branch ")) {
-      steps.push(parseBranch(header, body));
+      steps.push(parseBranch(header, body, lineHint));
     } else if (header.startsWith("parallel ")) {
       steps.push(parseParallel(header, body));
     } else if (header.startsWith("block ")) {
@@ -344,7 +365,10 @@ function parseWorkflow(workflowSource) {
     } else if (header === "output") {
       output = parseOutputBlock(body);
     } else {
-      throw new SkillSyntaxError(`Unsupported block header '${header}'.`);
+      throw new SkillSyntaxError(`Unsupported block header '${header}'.`, {
+        line: lineHint,
+        hint: "Valid block types: step, branch, parallel, block, output.",
+      });
     }
 
     index = blockEnd + 1;
@@ -396,7 +420,20 @@ export function parseSkill(source, options = {}) {
     }
   }
 
-  const rawWorkflow = parseWorkflow(mergedWorkflowSource);
+  const rawWorkflow = (() => {
+    try {
+      return parseWorkflow(mergedWorkflowSource);
+    } catch (err) {
+      if (err instanceof SkillSyntaxError && err.line != null && !err.source) {
+        throw new SkillSyntaxError(err.message.split("\n")[0], {
+          line: err.line,
+          source: mergedWorkflowSource,
+          hint: err.hint ?? undefined,
+        });
+      }
+      throw err;
+    }
+  })();
   const workflow = rawWorkflow.imports?.length > 0
     ? rawWorkflow
     : resolveWorkflowBlocks(rawWorkflow);

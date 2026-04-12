@@ -47,6 +47,7 @@ export interface Step {
   steps?: string[];
   choices?: string[];
   default?: unknown;
+  required?: boolean;
   docs?: string;
   retry?: number;
   fallback?: string;

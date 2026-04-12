@@ -634,13 +634,20 @@ async function executeStep({
           hasAnswer = true;
         }
 
-        if (!hasAnswer) {
+        // Halt only when required: true is explicitly set.
+        // Default behavior (required omitted or false): use null and continue.
+        if (!hasAnswer && step.required === true) {
           waitingForInput = {
             prompt: resolvedPrompt,
             choices: resolvedChoices,
             default: resolvedDefault,
           };
           break;
+        }
+
+        if (!hasAnswer) {
+          answer = null;
+          hasAnswer = true;
         }
 
         if (resolvedChoices && !resolvedChoices.includes(answer)) {

@@ -28,3 +28,15 @@ jobs:
           npx runeflow validate ./examples/open-pr.md
           npx runeflow validate ./examples/block-demo.md
           npx runeflow validate ./examples/release-notes.md
+          npx runeflow validate ./examples/checkpoint.md
+
+      - name: Smoke test runeflow init
+        run: |
+          mkdir -p /tmp/runeflow-init-test
+          cd /tmp/runeflow-init-test
+          git init -q
+          git config user.email "ci@runeflow.dev"
+          git config user.name "Runeflow CI"
+          git commit --allow-empty -m "init" -q
+          node $GITHUB_WORKSPACE/bin/runeflow.js init --no-local-llm --force
+          node $GITHUB_WORKSPACE/bin/runeflow.js validate *.md

@@ -6,24 +6,24 @@ The guiding principle stays the same: small runtime, explicit design, experiment
 
 ---
 
-## Theme 1 — Developer Experience
+## Theme 1 — Developer Experience ✅
 
 The core loop (validate → dryrun → run → inspect) is solid. The gaps are in onboarding friction and feedback quality.
 
-### `runeflow init` smoke test in CI
-The most common first impression. A broken `init` is invisible until a user hits it. Add a CI step that runs `runeflow init --no-local-llm --force` in a temp directory and validates the output.
+### `runeflow init` smoke test in CI ✅
+Added to `.github/workflows/ci.yml` — runs `runeflow init --no-local-llm --force` in a temp git repo and validates the generated output on every push.
 
-### Better error messages at parse time
-`SkillSyntaxError` messages are often raw parser output. They should point to the offending line, show the surrounding context, and suggest a fix. Especially important for the `runeflow` block DSL where a missing brace or wrong keyword is easy to make.
+### Better error messages at parse time ✅
+`SkillSyntaxError` now accepts `{ line, hint }` context. Errors include the offending line number, a code snippet pointer, and a plain-English hint. Covered cases: unterminated blocks, invalid step headers, missing `type=`, invalid branch declarations, unsupported block types.
+
+### `runeflow validate --watch` ✅
+`runeflow validate <file> --watch` re-validates on every save using chokidar. Prints a fresh result on each change. Exit with Ctrl-C.
+
+### `runeflow run --verbose` ✅
+`runeflow run <file> --verbose` prints each step's resolved inputs and outputs to stderr after the run completes, without requiring a separate `inspect-run` call.
 
 ### `runeflow dryrun` diff mode
 When a skill file changes, show what changed in the resolved step plan — not just the full plan. Useful for iterating on prompts and expressions without re-reading the whole output.
-
-### `runeflow validate --watch`
-Re-validate on file save. Tight feedback loop for skill authoring without running the full workflow.
-
-### Step-level `--verbose` output in `run`
-Currently `run` prints a summary. Add a `--verbose` flag that streams each step's resolved inputs and outputs to the terminal as they complete, without requiring a separate `inspect-run` call.
 
 ---
 

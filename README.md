@@ -454,11 +454,36 @@ Non-zero exit code halts the run by default. Add `allow_failure: true` to captur
 ```runeflow
 step confirm type=human_input {
   prompt: "Deploy to production?"
+  required: true
   choices: ["yes", "no"]
+  default: "no"
 }
 ```
 
-Provide answers up front with `--prompt '{"confirm":"yes"}'`, or let the runtime halt with `halted_on_input` and continue later with `runeflow resume`.
+The step outputs `{ answer: string }`. Reference it downstream with `steps.confirm.answer`.
+
+| Field | Default | Behavior |
+|---|---|---|
+| `required` omitted | — | Uses `default` if set, otherwise `answer` is `null` — run continues |
+| `required: false` | — | Same as omitted — explicit opt-out |
+| `required: true` | — | No answer halts the run with `halted_on_input` for later `resume` |
+
+Provide answers up front with `--prompt '{"confirm":"yes"}'` to run non-interactively. Resume a halted run with `runeflow resume --prompt '{"confirm":"yes"}'`.
+
+Use `required: false` with `skip_if` to make a step fully optional:
+
+```runeflow
+step ask_title type=human_input skip_if="inputs.title" {
+  prompt: "Short title for this checkpoint:"
+  required: false
+  default: "work-in-progress"
+}
+
+step summarize type=llm {
+  prompt: "Summarize work on {{ inputs.title or steps.ask_title.answer }}."
+  schema: { summary: string }
+}
+```
 
 ### block
 
@@ -943,6 +968,7 @@ Skills are in `.runeflow/skills/`. Run `runeflow skills list` to see available w
 | [`examples/import-demo.md`](./examples/import-demo.md) | Cross-file block imports |
 | [`examples/triage-issues.md`](./examples/triage-issues.md) | Issue triage — `branch` + `transform` + LLM classification |
 | [`examples/composio-github.md`](./examples/composio-github.md) | Composio adapter — GitHub API via plugin |
+| [`examples/checkpoint.md`](./examples/checkpoint.md) | Save/resume working state — `human_input` + multi-block + `transform` |
 
 ---
 
