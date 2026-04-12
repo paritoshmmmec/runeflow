@@ -76,14 +76,14 @@ On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runefl
 
 ### vs. prompt-as-program skills (g-stack)
 
-Compared against [g-stack](https://github.com/garytan/g-stack) — Garry Tan's widely-used Claude Code skill suite — where the entire skill file loads into context on every invocation:
+Compared against [g-stack](https://github.com/garrytan/gstack) — Garry Tan's widely-used Claude Code skill suite — where the entire skill file loads into context on every invocation:
 
 | Skill | g-stack input tokens | Runeflow input tokens | Reduction |
 |---|---|---|---|
-| ship (PR + version + changelog) | ~32,100 | ~700 | **-98%** 🔥 |
-| review (pre-landing code review) | ~18,900 | ~600 | **-97%** 🔥 |
+| [ship](https://github.com/garrytan/gstack/blob/main/ship/SKILL.md) (PR + version + changelog) | ~32,100 | ~700 | **-98%** 🔥 |
+| [review](https://github.com/garrytan/gstack/blob/main/review/SKILL.md) (pre-landing code review) | ~18,900 | ~600 | **-97%** 🔥 |
 
-g-stack's `ship/SKILL.md` is 2,543 lines — the full orchestration spec, bash preamble, specialist dispatch logic, and PR template all load into the LLM context every run. Runeflow's runtime owns sequencing and tool dispatch; the LLM only sees the resolved prompt for the step it's actually executing.
+g-stack's [`ship/SKILL.md`](https://github.com/garrytan/gstack/blob/main/ship/SKILL.md) is 2,543 lines — the full orchestration spec, bash preamble, specialist dispatch logic, and PR template all load into the LLM context every run. Runeflow's runtime owns sequencing and tool dispatch; the LLM only sees the resolved prompt for the step it's actually executing.
 
 > This is the core architectural difference: **prompt-as-program** (LLM reads and interprets the whole workflow) vs. **runtime-as-orchestrator** (LLM executes one bounded step at a time). See [`eval/gstack-comparison.md`](./eval/gstack-comparison.md) for the full breakdown.
 

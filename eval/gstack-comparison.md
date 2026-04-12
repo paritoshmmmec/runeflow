@@ -7,7 +7,7 @@ Token estimates use the ~4 chars/token approximation (GPT-4 tokenizer).
 
 ## ship
 
-| | g-stack SKILL.md | Runeflow examples/ship.md |
+| | [g-stack ship/SKILL.md](https://github.com/garrytan/gstack/blob/main/ship/SKILL.md) | Runeflow examples/ship.md |
 |---|---|---|
 | Lines | 2,543 | ~80 (runeflow block) |
 | Characters | 128,531 | ~2,800 |
@@ -49,7 +49,7 @@ deterministic `tool` and `cli` steps — zero LLM tokens.
 
 ## review
 
-| | g-stack SKILL.md | Runeflow examples/review-pr.md |
+| | [g-stack review/SKILL.md](https://github.com/garrytan/gstack/blob/main/review/SKILL.md) | Runeflow examples/review-pr.md |
 |---|---|---|
 | Lines | 1,467 | ~70 (runeflow block) |
 | Characters | 75,661 | ~2,400 |
