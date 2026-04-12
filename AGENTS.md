@@ -111,14 +111,14 @@ Before finishing meaningful changes, run:
 
 ```bash
 npm test
-node ./bin/runeflow.js validate ./examples/open-pr.runeflow.md
-node ./bin/runeflow.js validate ./examples/block-demo.runeflow.md
+npx runeflow validate ./examples/open-pr.runeflow.md
+npx runeflow validate ./examples/block-demo.runeflow.md
 ```
 
 If runtime behavior changes, also run:
 
 ```bash
-node ./bin/runeflow.js run ./examples/open-pr.runeflow.md --input '{"base_branch":"main"}' --runtime ./examples/open-pr-runtime.js --runs-dir ./.runeflow-runs
+npx runeflow run ./examples/open-pr.runeflow.md --input '{"base_branch":"main"}' --runtime ./examples/open-pr-runtime.js --runs-dir ./.runeflow-runs
 ```
 
 ## Style Guidance

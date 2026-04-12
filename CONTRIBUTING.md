@@ -35,9 +35,9 @@ Node >= 20 required (uses ESM, `node:test`, `--env-file`).
 
 ```bash
 npm test
-node ./bin/runeflow.js validate ./examples/open-pr.md
-node ./bin/runeflow.js validate ./examples/block-demo.md
-node ./bin/runeflow.js validate ./examples/release-notes.md
+npx runeflow validate ./examples/open-pr.md
+npx runeflow validate ./examples/block-demo.md
+npx runeflow validate ./examples/release-notes.md
 ```
 
 5. **Open a PR** with a clear description of what changed and why. Link the issue.
