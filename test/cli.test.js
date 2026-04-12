@@ -392,6 +392,7 @@ outputs:
 \`\`\`runeflow
 step confirm type=human_input {
   prompt: "Deploy?"
+  required: true
   choices: ["yes", "no"]
 }
 

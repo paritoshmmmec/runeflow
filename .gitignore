@@ -8,3 +8,4 @@ result_*.json
 .kiro/specs/smarter-init/design.md
 .kiro/specs/smarter-init/requirements.md
 .kiro/specs/smarter-init/tasks.md
+.DS_Store

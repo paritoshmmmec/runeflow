@@ -28,6 +28,7 @@ jobs:
           npx runeflow validate ./examples/open-pr.md
           npx runeflow validate ./examples/block-demo.md
           npx runeflow validate ./examples/release-notes.md
+          npx runeflow validate ./examples/checkpoint.md
 
       - name: Smoke test runeflow init
         run: |

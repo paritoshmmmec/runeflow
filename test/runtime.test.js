@@ -2223,6 +2223,7 @@ outputs:
 \`\`\`runeflow
 step confirm type=human_input {
   prompt: "Deploy to production?"
+  required: true
   choices: ["yes", "no"]
 }
 

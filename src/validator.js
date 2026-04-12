@@ -474,7 +474,10 @@ export function validateSkill(definition, options = {}) {
         issues.push(`step '${step.id}' must declare an expr`);
       }
       if (!isPlainObject(step.out) && !Array.isArray(step.out)) {
-        issues.push(`step '${step.id}' must declare an out schema`);
+        const hint = step.out !== undefined && step.out !== null
+          ? ` (got '${typeof step.out === "string" ? step.out : JSON.stringify(step.out)}' — out must be an object schema like { result: string } or an array schema like [string], not a bare type name)`
+          : "";
+        issues.push(`step '${step.id}' must declare an out schema${hint}`);
       }
     }
 
@@ -499,6 +502,14 @@ export function validateSkill(definition, options = {}) {
     if (step.kind === "human_input") {
       if (typeof step.prompt !== "string" || !step.prompt.trim()) {
         issues.push(`step '${step.id}' must declare a prompt`);
+      }
+
+      if (step.required !== undefined && typeof step.required !== "boolean") {
+        issues.push(`step '${step.id}' required must be a boolean`);
+      }
+
+      if (step.required === true && step.default === undefined) {
+        warnings.push(`step '${step.id}' has required: true and no default — run will halt if no answer is provided`);
       }
 
       if (step.choices !== undefined) {
