@@ -16,9 +16,9 @@ The goal is to keep the runtime small and easy to evolve during experimentation.
 
 ## File Format
 
-Runeflow files are standard Markdown documents. The `.runeflow.md` suffix is a convention — any `.md` file containing a fenced `runeflow` block is a valid Runeflow file. The runtime finds and executes the block regardless of filename. This means existing docs, runbooks, or READMEs can become executable without renaming.
+Runeflow files are standard Markdown documents. Any `.md` file containing a fenced `runeflow` block is a valid Runeflow file. The runtime finds and executes the block regardless of filename. This means existing docs, runbooks, or READMEs can become executable without renaming.
 
-The `.runeflow.md` convention exists to signal intent: this file is workflow-first. It may be relaxed in a future version to support plain `.md` as the primary extension.
+Plain `.md` is the primary extension. The `.runeflow.md` suffix is still accepted for backwards compatibility but is no longer the preferred convention.
 
 ## Current Runtime Model
 
@@ -84,14 +84,14 @@ Each executed step should continue to write its own JSON artifact. Preserve this
 
 When adding or updating examples:
 
-- prefer `.runeflow.md` for primary examples
+- use plain `.md` for all examples
 - keep examples small but realistic
 - show both deterministic tool usage and typed LLM outputs when possible
 - include result passing when it helps explain the model
 
 ## Skill Discovery Convention
 
-Project-level workflows live in `.runeflow/skills/`. Any `.runeflow.md` file in that directory is discoverable via `runeflow skills list` and runnable via `runeflow skills run <name>`.
+Project-level workflows live in `.runeflow/skills/`. Any `.md` file in that directory containing a `runeflow` block is discoverable via `runeflow skills list` and runnable via `runeflow skills run <name>`.
 
 When adding new project-level workflows, place them in `.runeflow/skills/` so agents can find and invoke them without being told the full path. The `AGENTS.md` file in a project should include an entry like:
 
@@ -111,14 +111,14 @@ Before finishing meaningful changes, run:
 
 ```bash
 npm test
-npx runeflow validate ./examples/open-pr.runeflow.md
-npx runeflow validate ./examples/block-demo.runeflow.md
+npx runeflow validate ./examples/open-pr.md
+npx runeflow validate ./examples/block-demo.md
 ```
 
 If runtime behavior changes, also run:
 
 ```bash
-npx runeflow run ./examples/open-pr.runeflow.md --input '{"base_branch":"main"}' --runtime ./examples/open-pr-runtime.js --runs-dir ./.runeflow-runs
+npx runeflow run ./examples/open-pr.md --input '{"base_branch":"main"}' --runtime ./examples/open-pr-runtime.js --runs-dir ./.runeflow-runs
 ```
 
 ## Style Guidance
