@@ -89,7 +89,7 @@ On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runefl
 - [Built-in tools](#built-in-tools)
 - [CLI reference](#cli-reference)
 - [Writing a runtime](#writing-a-runtime)
-- [Assemble mode](#assemble-mode)
+- [Assemble mode](#-assemble-preprocessor-for-agents)
 - [MCP server mode](#mcp-server-mode)
 - [Zero-config MCP & Composio wiring](#zero-config-mcp--composio-wiring)
 - [runeflow-registry](#runeflow-registry)
@@ -674,41 +674,66 @@ export default {
 
 ---
 
-## Assemble mode
+## 🔧 Assemble (Preprocessor for Agents)
 
-`runeflow assemble` is how Runeflow works alongside existing agents rather than replacing them.
+When an agent receives a raw `.runeflow.md` file, it sees DSL syntax, tool wiring, retry logic, and orchestration instructions it doesn't need. This wastes tokens and can confuse the agent into trying to interpret or re-execute the workflow itself. The agent only needs one thing: a focused job with real values already resolved.
 
-You run `runeflow assemble` before invoking an agent. Runeflow executes all steps before the target — tool calls, cli commands, transforms, and any earlier llm steps — resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file instead of the raw `.runeflow.md`. It sees only what it needs for one step.
+On orchestration-heavy tasks, `assemble` reduces input tokens by up to 82% — because the agent never sees the orchestration layer at all.
 
-Note: if your workflow has llm steps before the target, those run and consume tokens during assembly. If you want zero-token assembly, structure your workflow so all pre-steps are tool, cli, or transform steps.
+### How it works
+
+`runeflow assemble` executes all steps before the target — tool calls, cli commands, transforms — resolves the prompt with real values, and writes a clean Markdown context file. The agent loads that file and sees only what it needs for one step.
+
+The `open-pr-gh` example is the clearest demonstration. This is the workflow that opened [the first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) — diffing the branch, drafting the title and body via LLM, and running `gh pr create` as a `cli` step.
+
+Step 1 — run assemble:
 
 ```bash
-runeflow assemble ./draft-pr.runeflow.md \
+runeflow assemble ./examples/open-pr-gh.runeflow.md \
   --step draft \
   --input '{"base_branch":"main"}' \
   --output context.md
 ```
 
-The output contains the resolved prompt, operator docs, resolved input, and output schema. No `runeflow` block, no tool wiring, no DSL:
+Step 2 — pass to agent:
 
-```md
-# draft-pr — assembled context for `draft`
+```bash
+# Load context.md into Claude Code, Codex, or Cursor
+# The agent sees only the resolved prompt and output schema — no DSL, no tool wiring
+```
 
-## Guidance
-Write a concise PR title and body...
+Here's what the agent actually receives in `context.md`:
 
+````md
 ## Your task
-Draft a PR for feat/my-feature → main.
+
+Draft a pull request for feat/my-feature → main.
 Changed files: ["src/runtime.js", "src/cli.js"]
 Diff: src/runtime.js | 45 +++...
 
 ## Output schema
-{ "title": "string", "body": "string" }
+
+Respond with a JSON object matching this schema exactly. Output only the JSON — no markdown fences, no explanation.
+
+```json
+{
+  "title": "string",
+  "body": "string"
+}
 ```
+````
 
-This is how the -82% token reduction works in practice — the agent never sees orchestration instructions.
+No `runeflow` block. No tool wiring. No orchestration instructions. Just the resolved context and a clear output contract.
 
-Best for: Claude Code, Codex, Cursor, or any agent that reads files as context. Works today with zero agent integration required.
+Note: if your workflow has `llm` steps before the target, those run and consume tokens during assembly. For zero-token assembly, structure pre-steps as `tool`, `cli`, or `transform` steps.
+
+### When to use assemble vs run
+
+| Use `run` when... | Use `assemble` when... |
+|---|---|
+| The full workflow is automated end-to-end | You want a human or agent to handle one specific LLM step |
+| You are in CI/CD or a script | You are using Claude Code, Codex, or Cursor |
+| All steps are deterministic | The LLM step benefits from human review before execution |
 
 ---
 
