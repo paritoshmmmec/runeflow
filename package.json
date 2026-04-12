@@ -1,6 +1,6 @@
 {
   "name": "runeflow",
-  "version": "0.5.0-alpha",
+  "version": "0.5.1-alpha",
   "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
   "types": "index.d.ts",
@@ -18,7 +18,8 @@
     "registry/",
     "examples/",
     "index.d.ts",
-    "README.md"
+    "README.md",
+    "benchmark_report.md"
   ],
   "bin": {
     "runeflow": "./bin/runeflow.js"
