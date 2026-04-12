@@ -76,6 +76,7 @@
     }
   },
   "devDependencies": {
+    "@redwoodjs/agent-ci": "^0.10.1",
     "fast-check": "^4.6.0"
   }
 }
