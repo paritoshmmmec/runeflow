@@ -1,0 +1,24 @@
+{
+  "inputs": {
+    "deploy_command": "echo deployed",
+    "slack_channel": "#deploys",
+    "environment": "production"
+  },
+  "mocks": {
+    "tools": {
+      "post_success": { "ok": true, "ts": "1234567890.000001" },
+      "post_failure": { "ok": true, "ts": "1234567890.000002" }
+    },
+    "llm": {
+      "draft_success": { "message": "Deploy to production succeeded." },
+      "draft_failure": { "message": "Deploy to production failed. Check the logs." }
+    }
+  },
+  "expect": {
+    "status": "success",
+    "outputs": {
+      "status": "success",
+      "exit_code": 0
+    }
+  }
+}

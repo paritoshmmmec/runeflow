@@ -1,6 +1,6 @@
 {
   "name": "runeflow",
-  "version": "0.5.0-alpha",
+  "version": "0.5.1-alpha",
   "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
   "types": "index.d.ts",
@@ -18,7 +18,8 @@
     "registry/",
     "examples/",
     "index.d.ts",
-    "README.md"
+    "README.md",
+    "benchmark_report.md"
   ],
   "bin": {
     "runeflow": "./bin/runeflow.js"
@@ -33,7 +34,9 @@
     "eval:3p": "node --env-file=.env ./eval/3p-updates.js",
     "eval:addresszen": "node --env-file=.env ./eval/addresszen-automation.js --delay-ms 5000",
     "eval:adyntel": "node --env-file=.env ./eval/adyntel-automation.js --mode both --delay-ms 8000",
-    "eval:release-notes": "node --env-file=.env ./eval/release-notes.js"
+    "eval:release-notes": "node --env-file=.env ./eval/release-notes.js",
+    "eval:cookbook": "node ./eval/cookbook-runner.js",
+    "eval:cookbook:json": "node ./eval/cookbook-runner.js --format json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

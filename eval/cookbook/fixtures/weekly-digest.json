@@ -1,0 +1,33 @@
+{
+  "inputs": {
+    "owner": "acme",
+    "repo": "backend",
+    "slack_channel": "#eng-digest",
+    "stale_days": 7
+  },
+  "mocks": {
+    "tools": {
+      "list_prs": { "count": 4 },
+      "list_stale": {
+        "pull_requests": [
+          { "number": 42, "title": "Refactor auth middleware", "url": "https://github.com/acme/backend/pull/42", "author": "alice", "updated_at": "2026-04-01T10:00:00Z", "days_since_update": 11 },
+          { "number": 38, "title": "Add rate limiting", "url": "https://github.com/acme/backend/pull/38", "author": "bob", "updated_at": "2026-04-03T10:00:00Z", "days_since_update": 9 }
+        ]
+      },
+      "post": { "ok": true, "ts": "1234567890.000002" }
+    },
+    "llm": {
+      "draft_digest": {
+        "digest": "• 4 open PRs — 2 stale (9+ days)\n• #42 Refactor auth middleware (alice, 11d) looks blocked\n• #38 Add rate limiting (bob, 9d) needs review\n• No critical items flagged"
+      }
+    }
+  },
+  "expect": {
+    "status": "success",
+    "outputs": {
+      "pr_count": 4,
+      "stale_count": 2,
+      "digest": "• 4 open PRs — 2 stale (9+ days)\n• #42 Refactor auth middleware (alice, 11d) looks blocked\n• #38 Add rate limiting (bob, 9d) needs review\n• No critical items flagged"
+    }
+  }
+}

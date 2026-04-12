@@ -192,3 +192,16 @@ export function deepExpandEnvVars(value) {
 export function evalTransformExpr(expr, input) {
   return runInNewContext(`(${expr})`, { input });
 }
+
+/**
+ * Escape a value for safe interpolation into a shell command.
+ * Wraps the value in single quotes and escapes any embedded single quotes
+ * using the standard sh idiom: replace ' with '\'' (end quote, escaped
+ * literal quote, reopen quote).
+ *
+ * Non-string values are JSON-serialized first.
+ */
+export function shellEscape(value) {
+  const str = typeof value === "string" ? value : JSON.stringify(value);
+  return "'" + str.replace(/'/g, "'\\''") + "'";
+}

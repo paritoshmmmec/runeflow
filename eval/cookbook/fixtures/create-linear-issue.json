@@ -1,0 +1,29 @@
+{
+  "inputs": {
+    "failure_summary": "Test suite failed: TypeError: Cannot read properties of undefined (reading 'map') at src/runtime.js:412",
+    "team_id": "TEAM_ABC"
+  },
+  "mocks": {
+    "tools": {
+      "create_issue": { "id": "ENG-123", "url": "https://linear.app/team/issue/ENG-123" },
+      "skip": { "id": "", "url": "" }
+    },
+    "llm": {
+      "draft": {
+        "title": "TypeError in runtime.js:412 — Cannot read properties of undefined",
+        "description": "## What failed\n\nTest suite threw `TypeError: Cannot read properties of undefined (reading 'map')` at `src/runtime.js:412`.\n\n## Suggested next steps\n\n- Check the value passed to `.map()` at line 412\n- Add a null guard or validate input shape upstream"
+      }
+    }
+  },
+  "prompt_values": {
+    "confirm": "yes"
+  },
+  "expect": {
+    "status": "success",
+    "outputs": {
+      "confirmed": true,
+      "issue_id": "ENG-123",
+      "issue_url": "https://linear.app/team/issue/ENG-123"
+    }
+  }
+}

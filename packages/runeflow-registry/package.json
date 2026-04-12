@@ -1,6 +1,6 @@
 {
   "name": "runeflow-registry",
-  "version": "0.5.0-alpha",
+  "version": "0.5.1-alpha",
   "description": "Official tool registry for Runeflow — schemas and implementations for GitHub, Linear, Slack, and more",
   "type": "module",
   "license": "MIT",

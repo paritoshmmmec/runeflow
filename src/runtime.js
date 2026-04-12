@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { resolveWorkflowBlocks } from "./blocks.js";
 import { checkAuth } from "./auth.js";
 import { RuntimeError, ValidationError } from "./errors.js";
-import { evaluateExpression, resolveBindings } from "./expression.js";
+import { evaluateExpression, resolveBindings, resolveShellBindings } from "./expression.js";
 import { closeRuntimePlugins, createRuntimeEnvironment, createMcpClientPlugin, createMcpHttpClientPlugin, createComposioClientPlugin } from "./runtime-plugins.js";
 import { validateShape } from "./schema.js";
 import { getToolOutputSchema, getToolInputSchema, loadToolRegistry } from "./tool-registry.js";
@@ -47,6 +47,63 @@ function buildStepState(stepRuns) {
   return Object.fromEntries(stepRuns.map((stepRun) => [stepRun.id, stepRun]));
 }
 
+/**
+ * Collect the step ids that belong exclusively to the untaken branch arm.
+ *
+ * Layout example:
+ *   branch → taken_arm_start ... → convergence
+ *             untaken_arm_start ... → convergence
+ *
+ * We walk forward from `untakenStartId`, stopping when we reach the
+ * convergence point (first step reachable from the taken arm via next/end).
+ */
+function collectBranchArmStepIds(steps, stepIndex, untakenStartId, takenStartId) {
+  // Find the convergence point: follow the taken arm until it ends or jumps
+  function findArmEnd(startId) {
+    let idx = stepIndex.get(startId);
+    while (idx !== undefined && idx < steps.length) {
+      const step = steps[idx];
+      if (step.next && step.next !== "fail") {
+        return stepIndex.get(step.next);
+      }
+      if (step.kind === "branch") return idx; // branch inside arm — stop
+      idx += step.kind === "parallel" ? step.steps.length + 1 : 1;
+    }
+    return idx; // end of list
+  }
+
+  const convergenceIdx = findArmEnd(takenStartId);
+
+  const ids = [];
+  let idx = stepIndex.get(untakenStartId);
+  if (idx === undefined) return ids;
+
+  while (idx !== undefined && idx < steps.length) {
+    if (convergenceIdx !== undefined && idx >= convergenceIdx) break;
+    const step = steps[idx];
+    ids.push(step.id);
+    if (step.next && step.next !== "fail") break;
+    if (step.kind === "branch") break;
+    idx += step.kind === "parallel" ? step.steps.length + 1 : 1;
+  }
+
+  return ids;
+}
+
+function makeSkippedStepRun(step) {
+  return {
+    id: step.id,
+    kind: step.kind,
+    status: "skipped",
+    attempts: 0,
+    inputs: {},
+    outputs: null,
+    error: null,
+    started_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+  };
+}
+
 async function invokeTool(step, resolvedInput, runtime, state) {
   const tool = runtime.tools?.[step.tool];
 
@@ -61,9 +118,9 @@ async function invokeTool(step, resolvedInput, runtime, state) {
 }
 
 function projectLlmContext(definition, step) {
-  const docs = step.docs
-    ? (definition.docBlocks?.[step.docs] ?? definition.docs)
-    : definition.docs;
+  // Per-step section docs take priority, then named doc blocks, then global docs
+  const docs = definition.stepDocs?.[step.id]
+    ?? (step.docs ? (definition.docBlocks?.[step.docs] ?? definition.docs) : definition.docs);
   return {
     docs,
     metadata: deepClone(definition.metadata),
@@ -132,7 +189,7 @@ function resolveLlmConfig(definition, step) {
   return step.llm ?? definition.metadata.llm ?? null;
 }
 
-async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtime, state) {
+async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtime, state, options = {}) {
   const llmConfig = resolveLlmConfig(definition, step);
 
   if (!llmConfig) {
@@ -157,6 +214,7 @@ async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtim
     state,
     docs: context.docs,
     context,
+    onPartialObject: options.onPartialObject,
   });
 }
 
@@ -296,7 +354,7 @@ function resolveStepCacheInput(step, state) {
 
   if (step.kind === "cli") {
     return {
-      command: resolveBindings(step.command, state),
+      command: resolveShellBindings(step.command, state),
     };
   }
 
@@ -501,7 +559,10 @@ async function executeStep({
       } else if (step.kind === "llm") {
         resolvedPrompt = resolveBindings(step.prompt, state);
         resolvedInput = resolveBindings(step.input ?? {}, state);
-        finalOutputs = await invokeLlm(definition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state);
+        const onPartialObject = typeof options.onStream === "function"
+          ? (event) => options.onStream({ type: "llm:partial", stepId: step.id, ...event })
+          : undefined;
+        finalOutputs = await invokeLlm(definition, step, resolvedPrompt, resolvedInput, effectiveRuntime, state, { onPartialObject });
         const issues = validateShape(finalOutputs, step.schema, `steps.${step.id}`);
         if (issues.length) {
           throw new RuntimeError(`LLM output failed validation: ${issues.join("; ")}`);
@@ -527,7 +588,7 @@ async function executeStep({
           throw new RuntimeError(`Transform output failed validation: ${issues.join("; ")}`);
         }
       } else if (step.kind === "cli") {
-        resolvedPrompt = resolveBindings(step.command, state);
+        resolvedPrompt = resolveShellBindings(step.command, state);
         if (typeof resolvedPrompt !== "string" || !resolvedPrompt.trim()) {
           throw new RuntimeError(`cli step '${step.id}' command resolved to an empty string.`);
         }
@@ -906,6 +967,17 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
     while (index < resolvedDefinition.workflow.steps.length) {
       const step = resolvedDefinition.workflow.steps[index];
       const state = buildState(inputs, run.steps, resolvedDefinition.consts ?? {});
+
+      // If this step was pre-marked as skipped (untaken branch arm), skip over it
+      if (run.steps.some((s) => s.id === step.id && s.status === "skipped")) {
+        index += step.kind === "parallel" ? step.steps.length + 1 : 1;
+        continue;
+      }
+
+      if (typeof effectiveOptions.onStream === "function") {
+        effectiveOptions.onStream({ type: "step:start", stepId: step.id, kind: step.kind, runId: run.run_id });
+      }
+
       const result = step.kind === "parallel"
         ? await executeParallelStep({
           definition: resolvedDefinition,
@@ -928,6 +1000,16 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           toolRegistry,
           options: effectiveOptions,
         });
+
+      if (typeof effectiveOptions.onStream === "function") {
+        effectiveOptions.onStream({
+          type: "step:complete",
+          stepId: step.id,
+          kind: step.kind,
+          runId: run.run_id,
+          status: result.stepRun?.status ?? (result.abortRun ? "aborted" : "unknown"),
+        });
+      }
 
       if (result.abortRun) {
         failRun(run, result.abortRun.reason);
@@ -982,7 +1064,28 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
           return run;
         }
 
-        index = stepIndex.get(result.outputs.target);
+        const takenTarget = result.outputs.target;
+        const untakenTarget = takenTarget === step.then ? step.else : step.then;
+
+        // Mark all steps in the untaken arm as skipped so they appear in
+        // stepMap with null outputs — this lets {{ a }}{{ b }} merge patterns
+        // resolve cleanly without throwing "Unknown reference".
+        if (untakenTarget && untakenTarget !== "fail") {
+          const untakenIds = collectBranchArmStepIds(
+            resolvedDefinition.workflow.steps,
+            stepIndex,
+            untakenTarget,
+            takenTarget,
+          );
+          for (const untakenId of untakenIds) {
+            const untakenStep = resolvedDefinition.workflow.steps[stepIndex.get(untakenId)];
+            if (untakenStep) {
+              run.steps.push(makeSkippedStepRun(untakenStep));
+            }
+          }
+        }
+
+        index = stepIndex.get(takenTarget);
         continue;
       }
 
@@ -1017,6 +1120,11 @@ export async function runSkill(definition, inputs, runtime = {}, options = {}) {
 
     run.artifact_path = await writeRunArtifact(run, runsDir);
     await emitTelemetry(run, resolvedDefinition, effectiveOptions);
+
+    if (typeof effectiveOptions.onStream === "function") {
+      effectiveOptions.onStream({ type: "run:complete", runId: run.run_id, status: run.status });
+    }
+
     return run;
   } finally {
     await closeRuntimePlugins(effectiveRuntime).catch(() => {});

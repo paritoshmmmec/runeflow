@@ -1,6 +1,6 @@
 {
   "name": "runeflow-mcp",
-  "version": "0.5.0-alpha",
+  "version": "0.5.1-alpha",
   "description": "MCP server that exposes runeflow_run as a tool — run any .md skill from Claude Code, Cursor, or any MCP-compatible agent",
   "type": "module",
   "license": "MIT",

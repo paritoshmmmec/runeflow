@@ -1,0 +1,46 @@
+{
+  "inputs": {
+    "owner": "acme",
+    "repo": "backend",
+    "base_branch": "main",
+    "slack_channel": "#deploys",
+    "notion_database_id": "abc123def456"
+  },
+  "mocks": {
+    "tools": {
+      "get_branch": { "branch": "feat/add-rate-limiting" },
+      "get_diff": {
+        "base": "main",
+        "summary": "+ Added rate limiting middleware\n+ Added tests for rate limiter\n- Removed legacy throttle helper",
+        "files": ["src/middleware/rate-limit.js", "test/rate-limit.test.js", "src/middleware/throttle.js"]
+      },
+      "open_pr": {
+        "number": 99,
+        "url": "https://github.com/acme/backend/pull/99",
+        "state": "open"
+      },
+      "post_slack": { "ok": true, "ts": "1234567890.000010" },
+      "log_notion": {
+        "id": "notion-page-id-001",
+        "url": "https://notion.so/acme/notion-page-id-001"
+      }
+    },
+    "llm": {
+      "draft_pr": {
+        "title": "feat: add rate limiting middleware",
+        "body": "## What\n\nAdds a rate limiting middleware to cap requests per IP.\n\n## Why\n\nPrevents abuse and protects downstream services.\n\n## Changes\n\n- `src/middleware/rate-limit.js` — new middleware\n- `test/rate-limit.test.js` — unit tests\n- Removed legacy `throttle.js`",
+        "slack_message": "PR #99 open: feat: add rate limiting middleware — https://github.com/acme/backend/pull/99",
+        "notion_content": "Opened PR #99 feat: add rate limiting middleware on 2026-04-12. Adds per-IP rate limiting and removes legacy throttle helper."
+      }
+    }
+  },
+  "expect": {
+    "status": "success",
+    "outputs": {
+      "pr_number": 99,
+      "pr_url": "https://github.com/acme/backend/pull/99",
+      "slack_ts": "1234567890.000010",
+      "notion_page_id": "notion-page-id-001"
+    }
+  }
+}

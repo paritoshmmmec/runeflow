@@ -23,7 +23,7 @@ The root cause is that workflow logic — sequencing, branching, validation, too
 
 ## The solution
 
-Runeflow moves execution semantics out of the prompt and into a small runtime. One `.runeflow.md` file combines human-readable guidance with a typed, executable workflow block. The runtime owns sequencing, branching, retries, tool execution, and schema validation. The LLM sees only what it needs: a tight prompt, the relevant docs, and the output schema.
+Runeflow moves execution semantics out of the prompt and into a small runtime. One `.md` file combines human-readable guidance with a typed, executable workflow block. The runtime owns sequencing, branching, retries, tool execution, and schema validation. The LLM sees only what it needs: a tight prompt, the relevant docs, and the output schema.
 
 Prompts are good for judgment and language. They're a bad place to hide workflow logic. Runeflow puts workflow logic back in code, while keeping authoring lightweight and human-readable.
 
@@ -74,7 +74,7 @@ Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 
 On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
 
-> The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.runeflow.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
+> The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
 
 ---
 
@@ -129,7 +129,7 @@ echo "CEREBRAS_API_KEY=your-key-here" > .env
 
 **Generate a skill with `runeflow init`**
 
-Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.runeflow.md` files — and generates a ready-to-run `.runeflow.md` tailored to what it finds.
+Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.md` runeflow files — and generates a ready-to-run `.md` tailored to what it finds.
 
 ```bash
 runeflow init
@@ -189,7 +189,7 @@ output {
 **Run it**
 
 ```bash
-runeflow run ./draft-pr.runeflow.md --input '{"base_branch":"main"}'
+runeflow run ./draft-pr.md --input '{"base_branch":"main"}'
 ```
 
 The default runtime handles all 6 providers automatically — no `--runtime` flag needed. Keys are resolved from `process.env` or a `.env` file in the current directory.
@@ -208,7 +208,7 @@ Every step writes a JSON artifact to `.runeflow-runs/` — inputs, outputs, timi
 **Validate before you run**
 
 ```bash
-runeflow validate ./draft-pr.runeflow.md
+runeflow validate ./draft-pr.md
 # { "valid": true, "issues": [] }
 ```
 
@@ -236,7 +236,7 @@ When a run fails, work through these steps in order.
 **1. Validate first**
 
 ```bash
-runeflow validate ./my-skill.runeflow.md
+runeflow validate ./my-skill.md
 ```
 
 Validation is static — no API calls, no git. It catches broken step references, missing inputs, and schema mismatches before you spend tokens. Fix any errors here before going further.
@@ -244,7 +244,7 @@ Validation is static — no API calls, no git. It catches broken step references
 **2. Dryrun to see what each step would do**
 
 ```bash
-runeflow dryrun ./my-skill.runeflow.md --input '{"base_branch":"main"}'
+runeflow dryrun ./my-skill.md --input '{"base_branch":"main"}'
 ```
 
 Dryrun walks every step and resolves all bindings without executing anything. It shows the resolved prompt, tool arguments, branch conditions, and command strings. If a step would receive the wrong input, you'll see it here.
@@ -252,7 +252,7 @@ Dryrun walks every step and resolves all bindings without executing anything. It
 **3. Run and inspect the artifact**
 
 ```bash
-runeflow run ./my-skill.runeflow.md --input '{"base_branch":"main"}'
+runeflow run ./my-skill.md --input '{"base_branch":"main"}'
 # note the run_id in the output, e.g. run_20260401121315_dojn0r
 
 runeflow inspect-run run_20260401121315_dojn0r --format table
@@ -273,7 +273,7 @@ This prints the full step artifact: inputs, outputs, error, and timing.
 If the run halted on a tool error or `human_input` step, fix the underlying issue and resume from where it stopped — completed steps replay from cache:
 
 ```bash
-runeflow resume ./my-skill.runeflow.md
+runeflow resume ./my-skill.md
 ```
 
 **5. Record a fixture and test**
@@ -281,13 +281,13 @@ runeflow resume ./my-skill.runeflow.md
 Once the run succeeds, record it as a fixture so you can catch regressions without real API calls:
 
 ```bash
-runeflow run ./my-skill.runeflow.md --input '{"base_branch":"main"}' --record-fixture test/fixtures/my-skill.fixture.json
+runeflow run ./my-skill.md --input '{"base_branch":"main"}' --record-fixture test/fixtures/my-skill.fixture.json
 ```
 
 Then run it in test mode:
 
 ```bash
-runeflow test ./my-skill.runeflow.md --fixture test/fixtures/my-skill.fixture.json
+runeflow test ./my-skill.md --fixture test/fixtures/my-skill.fixture.json
 ```
 
 The fixture mocks tools and LLM calls by step id, so each step can be controlled independently. Edit the fixture by hand to tighten assertions or simulate failure cases. See [`test/fixtures/open-pr.fixture.json`](./test/fixtures/open-pr.fixture.json) for a reference example.
@@ -306,9 +306,9 @@ The fixture mocks tools and LLM calls by step id, so each step can be controlled
 
 ## File shape
 
-A `.runeflow.md` is a standard Markdown document. YAML frontmatter declares inputs and outputs. The prose is guidance for the LLM. The `runeflow` block is the executable workflow.
+A `.md` file is a standard Markdown document. YAML frontmatter declares inputs and outputs. The prose is guidance for the LLM. The `runeflow` block is the executable workflow.
 
-The `.runeflow.md` suffix is a convention, not a requirement. Any `.md` file containing a `runeflow` block is valid.
+Any `.md` file containing a `runeflow` block is valid. The `.runeflow.md` suffix is still accepted for backwards compatibility.
 
 ````md
 ---
@@ -463,7 +463,7 @@ step greet type=block {
 Blocks can also be imported from another file:
 
 ```runeflow
-import blocks from "./shared/pr-blocks.runeflow.md"
+import blocks from "./shared/pr-blocks.md"
 
 step check type=block {
   block: check_file_exists
@@ -543,14 +543,14 @@ runeflow assemble <file> --step <step-id> --input '{"key":"value"}' [--runtime .
 runeflow inspect-run <run-id> [--runs-dir ./.runeflow-runs]
                     [--step <step-id>] [--format table|json]
 runeflow build <description> [--provider <p>] [--model <m>] [--out <file>] [--runtime ./runtime.js]
-runeflow import <file> [--output converted.runeflow.md]
+runeflow import <file> [--output converted.md]
 runeflow tools list [--runtime ./runtime.js]
 runeflow tools inspect <tool-name> [--runtime ./runtime.js]
 runeflow skills list
 runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 ```
 
-`init` — inspects the current directory and generates a ready-to-run `.runeflow.md`. Detects installed SDKs, git history, CI config, and existing `.runeflow.md` files to pick the best template. Pass `--context` for a hint, `--template` to force one, or `--no-local-llm` to skip the local model download.
+`init` — inspects the current directory and generates a ready-to-run `.md` skill file. Detects installed SDKs, git history, CI config, and existing runeflow files to pick the best template. Pass `--context` for a hint, `--template` to force one, or `--no-local-llm` to skip the local model download.
 
 `dryrun` — validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. Shows exactly what each step would do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders derived from the output schema.
 
@@ -558,13 +558,13 @@ runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 
 `resume` — reads the most recent `halted_on_error` or `halted_on_input` run, replays completed steps from cache, and retries from the halt point.
 
-`watch` — runs a `.runeflow.md` on a cron schedule, on file changes, or both.
+`watch` — runs a `.md` skill file on a cron schedule, on file changes, or both.
 
 `assemble` — executes all steps before a target `llm` step (tool, cli, transform, `parallel`, and any earlier llm steps), resolves the prompt with real values, and writes a clean Markdown context file for an agent to load. JSON output also includes pre-step execution metadata and notes about token-spending llm pre-steps or placeholder human input values. If earlier llm steps exist, they run and consume tokens. See [Assemble mode](#assemble-mode).
 
 `inspect-run` — reads a run artifact by run ID. Use `--format table` for a compact step timeline. Use `--step <id>` to drill into a single step's artifact.
 
-`build` — compiles an English description into a `.runeflow.md` using the LLM execution path.
+`build` — compiles an English description into a `.md` skill file using the LLM execution path.
 
 `run --record-fixture <path>` — writes a test fixture JSON after a real run, capturing inputs, per-step tool and LLM outputs as mocks, and the final status.
 
@@ -676,7 +676,7 @@ export default {
 
 ## 🔧 Assemble (Preprocessor for Agents)
 
-When an agent receives a raw `.runeflow.md` file, it sees DSL syntax, tool wiring, retry logic, and orchestration instructions it doesn't need. This wastes tokens and can confuse the agent into trying to interpret or re-execute the workflow itself. The agent only needs one thing: a focused job with real values already resolved.
+When an agent receives a raw `.md` runeflow file, it sees DSL syntax, tool wiring, retry logic, and orchestration instructions it doesn't need. This wastes tokens and can confuse the agent into trying to interpret or re-execute the workflow itself. The agent only needs one thing: a focused job with real values already resolved.
 
 On orchestration-heavy tasks, `assemble` reduces input tokens by up to 82% — because the agent never sees the orchestration layer at all.
 
@@ -689,7 +689,7 @@ The `open-pr-gh` example is the clearest demonstration. This is the workflow tha
 Step 1 — run assemble:
 
 ```bash
-runeflow assemble ./examples/open-pr-gh.runeflow.md \
+runeflow assemble ./examples/open-pr-gh.md \
   --step draft \
   --input '{"base_branch":"main"}' \
   --output context.md
@@ -761,7 +761,7 @@ Add to your MCP config (`.mcp.json` for Claude Code):
 }
 ```
 
-The agent never sees the `.runeflow.md` internals. It gets back `{ status, run_id, outputs }`.
+The agent never sees the skill file internals. It gets back `{ status, run_id, outputs }`.
 
 ---
 
@@ -902,7 +902,7 @@ await runRuneflow(definition, inputs, runtime, {
 
 ## Skill discovery
 
-Project-level skills live in `.runeflow/skills/`. Any `.runeflow.md` file there is discoverable:
+Project-level skills live in `.runeflow/skills/`. Any `.md` file there containing a `runeflow` block is discoverable:
 
 ```bash
 runeflow skills list
@@ -922,14 +922,14 @@ Skills are in `.runeflow/skills/`. Run `runeflow skills list` to see available w
 
 | File | What it shows |
 |---|---|
-| [`examples/open-pr.runeflow.md`](./examples/open-pr.runeflow.md) | PR prep — tool steps + LLM |
-| [`examples/open-pr-gh.runeflow.md`](./examples/open-pr-gh.runeflow.md) | Full PR open — `cli` step with `gh pr create` |
-| [`examples/review-draft.runeflow.md`](./examples/review-draft.runeflow.md) | Code review notes — step-level LLM override |
-| [`examples/release-notes.runeflow.md`](./examples/release-notes.runeflow.md) | Release notes — `transform` + `const` + LLM |
-| [`examples/block-demo.runeflow.md`](./examples/block-demo.runeflow.md) | Reusable block templates |
-| [`examples/import-demo.runeflow.md`](./examples/import-demo.runeflow.md) | Cross-file block imports |
-| [`examples/triage-issues.runeflow.md`](./examples/triage-issues.runeflow.md) | Issue triage — `branch` + `transform` + LLM classification |
-| [`examples/composio-github.runeflow.md`](./examples/composio-github.runeflow.md) | Composio adapter — GitHub API via plugin |
+| [`examples/open-pr.md`](./examples/open-pr.md) | PR prep — tool steps + LLM |
+| [`examples/open-pr-gh.md`](./examples/open-pr-gh.md) | Full PR open — `cli` step with `gh pr create` |
+| [`examples/review-draft.md`](./examples/review-draft.md) | Code review notes — step-level LLM override |
+| [`examples/release-notes.md`](./examples/release-notes.md) | Release notes — `transform` + `const` + LLM |
+| [`examples/block-demo.md`](./examples/block-demo.md) | Reusable block templates |
+| [`examples/import-demo.md`](./examples/import-demo.md) | Cross-file block imports |
+| [`examples/triage-issues.md`](./examples/triage-issues.md) | Issue triage — `branch` + `transform` + LLM classification |
+| [`examples/composio-github.md`](./examples/composio-github.md) | Composio adapter — GitHub API via plugin |
 
 ---
 
@@ -948,9 +948,9 @@ step push type=tool cache=false {
 
 ## Trust model
 
-- `.runeflow.md` files define `transform` expressions — treat them as trusted code in the host process
+- `.md` skill files define `transform` expressions — treat them as trusted code in the host process
 - `transform` runs via `vm.runInNewContext` with a restricted context (no `process`, no `require`, no `fs`). Set `RUNEFLOW_DISABLE_TRANSFORM=1` to block transform steps entirely
-- `cli` steps run shell commands via `sh -c` — treat `.runeflow.md` files as executable code
+- `cli` steps run shell commands via `sh -c` — treat skill files as executable code
 - `--runtime ./path.js` loads that module via Node `import()` — only load trusted runtimes
 - `mcp_servers` and `composio` frontmatter support `${VAR}` env var interpolation. Only a curated allowlist of known integration keys can be expanded by default. Extend or disable it:
 

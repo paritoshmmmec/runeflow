@@ -1,5 +1,5 @@
 import { SkillSyntaxError } from "./errors.js";
-import { getByPath } from "./utils.js";
+import { getByPath, shellEscape } from "./utils.js";
 
 export const STEP_STATE_FIELDS = new Set([
   "status",
@@ -35,6 +35,12 @@ function tokenize(expression) {
       const operator = expression.slice(index, index + 2);
       tokens.push({ type: "operator", value: operator });
       index += 2;
+      continue;
+    }
+
+    if (char === "?" || char === ":") {
+      tokens.push({ type: char, value: char });
+      index += 1;
       continue;
     }
 
@@ -228,8 +234,26 @@ function buildParser(tokens) {
     return left;
   }
 
+  function parseTernary() {
+    const condition = parseOr();
+
+    if (!match("?")) {
+      return condition;
+    }
+
+    const consequent = parseTernary();
+
+    if (!match(":")) {
+      throw new SkillSyntaxError("Expected ':' in ternary expression.");
+    }
+
+    const alternate = parseTernary();
+
+    return { type: "ternary", condition, consequent, alternate };
+  }
+
   function parseExpressionAst() {
-    const ast = parseOr();
+    const ast = parseTernary();
     if (index < tokens.length) {
       throw new SkillSyntaxError(`Unexpected trailing token '${tokens[index].value}'.`);
     }
@@ -274,6 +298,12 @@ function resolvePath(pathExpression, state) {
       return getByPath(stepState[rest[0]], rest.slice(1));
     }
 
+    // If the step was skipped (outputs: null), return empty string for any
+    // field access so {{ skipped.field }} resolves to "" rather than throwing.
+    if (stepState.outputs === null || stepState.outputs === undefined) {
+      return { found: true, value: "" };
+    }
+
     return getByPath(stepState.outputs ?? {}, rest);
   }
 
@@ -295,6 +325,12 @@ function evaluateAst(node, state) {
 
   if (node.type === "unary") {
     return !Boolean(evaluateAst(node.value, state));
+  }
+
+  if (node.type === "ternary") {
+    return Boolean(evaluateAst(node.condition, state))
+      ? evaluateAst(node.consequent, state)
+      : evaluateAst(node.alternate, state);
   }
 
   if (node.type === "binary") {
@@ -386,6 +422,45 @@ export function resolveTemplate(template, state) {
     .join("");
 }
 
+export function resolveShellTemplate(template, state) {
+  const segments = parseTemplateSegments(template);
+  const expressionSegments = segments.filter((segment) => segment.type === "expression");
+
+  if (expressionSegments.length === 0) {
+    return segments.map((segment) => segment.value).join("");
+  }
+
+  if (expressionSegments.length === 1 && segments.length === 1) {
+    const resolved = evaluateExpression(expressionSegments[0].value, state);
+    return shellEscape(resolved);
+  }
+
+  return segments
+    .map((segment) => {
+      if (segment.type === "text") {
+        return segment.value;
+      }
+
+      const resolved = evaluateExpression(segment.value, state);
+      const str = typeof resolved === "string" ? resolved : JSON.stringify(resolved);
+      return str.replace(/['"\\$`!;|&()<>{}#\n\r]/g, "\\$&");
+    })
+    .join("");
+}
+
+export function resolveShellBindings(value, state) {
+  if (typeof value === "string" && hasTemplateExpressions(value)) {
+    return resolveShellTemplate(value, state);
+  }
+
+  if (typeof value === "string" && looksLikeExpression(value)) {
+    const resolved = evaluateExpression(value, state);
+    return shellEscape(resolved);
+  }
+
+  return value;
+}
+
 export function looksLikeExpression(value) {
   return typeof value === "string" && /\b(?:const|inputs|steps)\./.test(value);
 }
@@ -406,6 +481,13 @@ export function collectExpressionPaths(expression) {
 
     if (node.type === "unary") {
       walk(node.value);
+      return;
+    }
+
+    if (node.type === "ternary") {
+      walk(node.condition);
+      walk(node.consequent);
+      walk(node.alternate);
       return;
     }
 
