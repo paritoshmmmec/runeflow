@@ -1,6 +1,6 @@
 {
   "name": "runeflow",
-  "version": "0.4.0",
+  "version": "0.5.0-alpha",
   "description": "Hybrid markdown + DSL runtime for executable AI skills, typed steps, and JSON run artifacts",
   "type": "module",
   "types": "index.d.ts",
@@ -25,6 +25,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "release": "bash scripts/tag-release.sh",
     "validate:example": "npx runeflow validate ./examples/open-pr.md",
     "validate:block-demo": "npx runeflow validate ./examples/block-demo.md",
     "validate:release-notes": "npx runeflow validate ./examples/release-notes.md",
