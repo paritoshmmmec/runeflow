@@ -43,6 +43,12 @@ const SKILLS = [
     fixture: "eval/cookbook/fixtures/weekly-digest.json",
     runtime: "eval/cookbook/runtimes/weekly-digest-runtime.js",
   },
+  {
+    name: "pr-notify-notion",
+    skill: "eval/cookbook/pr-notify-notion.md",
+    fixture: "eval/cookbook/fixtures/pr-notify-notion.json",
+    runtime: "eval/cookbook/runtimes/pr-notify-notion-runtime.js",
+  },
 ];
 
 // ─── CLI args ─────────────────────────────────────────────────────────────────
