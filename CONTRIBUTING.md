@@ -8,7 +8,7 @@ Thanks for your interest. Runeflow is in active alpha — contributions are welc
 
 - **Small runtime, explicit design.** Prefer simple, readable code over clever abstractions. If it needs a comment to explain, it probably needs a redesign.
 - **Behavior changes need tests.** Every meaningful change to runtime behavior should come with a test that would have caught a regression.
-- **Don't introduce loops, recursion, or arbitrary DAGs.** The execution model is intentionally narrow. Keep changes focused on the existing step kinds.
+- **Don't introduce loops, recursion, or arbitrary DAGs.** The execution model is intentionally narrow. See [plans/ROADMAP.md](./plans/ROADMAP.md) for what's in scope.
 - **Keep the LLM out of execution semantics.** The runtime owns control flow. The LLM produces bounded outputs for a single step.
 
 ---

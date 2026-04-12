@@ -74,6 +74,19 @@ Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 
 On orchestration-heavy tasks, raw prompts fall into tool-discovery loops. Runeflow eliminates this failure mode entirely. See [benchmark_report.md](./benchmark_report.md) for full data.
 
+### vs. prompt-as-program skills (g-stack)
+
+Compared against [g-stack](https://github.com/garytan/g-stack) — Garry Tan's widely-used Claude Code skill suite — where the entire skill file loads into context on every invocation:
+
+| Skill | g-stack input tokens | Runeflow input tokens | Reduction |
+|---|---|---|---|
+| ship (PR + version + changelog) | ~32,100 | ~700 | **-98%** 🔥 |
+| review (pre-landing code review) | ~18,900 | ~600 | **-97%** 🔥 |
+
+g-stack's `ship/SKILL.md` is 2,543 lines — the full orchestration spec, bash preamble, specialist dispatch logic, and PR template all load into the LLM context every run. Runeflow's runtime owns sequencing and tool dispatch; the LLM only sees the resolved prompt for the step it's actually executing.
+
+> This is the core architectural difference: **prompt-as-program** (LLM reads and interprets the whole workflow) vs. **runtime-as-orchestrator** (LLM executes one bounded step at a time). See [`eval/gstack-comparison.md`](./eval/gstack-comparison.md) for the full breakdown.
+
 > The [first pull request to this repo](https://github.com/paritoshmmmec/runeflow/pull/1) was opened by Runeflow itself — using `examples/open-pr-gh.md` to diff the branch, draft the title and body via LLM, and run `gh pr create` as a `cli` step.
 
 ---
