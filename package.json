@@ -36,7 +36,9 @@
     "eval:adyntel": "node --env-file=.env ./eval/adyntel-automation.js --mode both --delay-ms 8000",
     "eval:release-notes": "node --env-file=.env ./eval/release-notes.js",
     "eval:cookbook": "node ./eval/cookbook-runner.js",
-    "eval:cookbook:json": "node ./eval/cookbook-runner.js --format json"
+    "eval:cookbook:json": "node ./eval/cookbook-runner.js --format json",
+    "scenarios": "node scenarios/harness/run-scripted.js",
+    "scenarios:agent": "node scenarios/harness/run-agent.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

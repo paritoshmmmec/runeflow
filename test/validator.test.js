@@ -45,6 +45,35 @@ output {
   assert.deepEqual(validation.issues, []);
 });
 
+test("validateRuneflow accepts llm config with a gateway model id and no provider", () => {
+  const parsed = parseRuneflow(`---
+name: gateway-model-only
+description: Gateway model only
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+llm:
+  model: anthropic/claude-sonnet-4.6
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "hi"
+  schema: { result: string }
+}
+
+output {
+  result: steps.draft.result
+}
+\`\`\`
+`);
+
+  const validation = validateRuneflow(parsed);
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.issues, []);
+});
+
 test("validateRuneflow rejects forward references and missing llm schema", () => {
   const parsed = parseRuneflow(`---
 name: invalid

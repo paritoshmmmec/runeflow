@@ -305,6 +305,57 @@ output {
   assert.ok(result.includes("a brief summary"), "llm pre-step output resolved in target prompt");
 });
 
+test("assembleRuneflow: routes model-only llm config through the _auto handler", async () => {
+  const skill = `---
+name: llm-prestep-auto
+version: 0.1
+inputs:
+  topic: string
+outputs:
+  final: string
+llm:
+  model: anthropic/claude-sonnet-4.6
+---
+
+\`\`\`runeflow
+step summarize type=llm {
+  prompt: "Summarize {{ inputs.topic }}"
+  schema: { summary: string }
+}
+
+step draft type=llm {
+  prompt: "Expand on: {{ steps.summarize.summary }}"
+  input: { summary: steps.summarize.summary }
+  schema: { final: string }
+}
+
+output {
+  final: steps.draft.final
+}
+\`\`\`
+`;
+
+  const definition = parseRuneflow(skill);
+  const calls = [];
+  const runtime = {
+    llms: {
+      _auto: async ({ step, llm, prompt }) => {
+        calls.push({ id: step.id, llm, prompt });
+        if (step.id === "summarize") return { summary: "a brief summary" };
+        return { final: "expanded result" };
+      },
+    },
+  };
+
+  const result = await assembleRuneflow(definition, "draft", { topic: "runeflow" }, runtime);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, "summarize");
+  assert.equal(calls[0].llm.provider, undefined);
+  assert.equal(calls[0].llm.model, "anthropic/claude-sonnet-4.6");
+  assert.ok(result.includes("a brief summary"));
+});
+
 test("assembleRuneflow: respects skip_if on pre-steps", async () => {
   const skill = `---
 name: skip-if-skill

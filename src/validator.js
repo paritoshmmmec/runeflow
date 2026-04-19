@@ -210,8 +210,24 @@ function validateLlmConfig(config, location, issues) {
     return;
   }
 
-  if (typeof config.provider !== "string" || !config.provider.trim()) {
-    issues.push(`${location}.provider is required`);
+  const provider = typeof config.provider === "string" && config.provider.trim()
+    ? config.provider.trim()
+    : null;
+  const model = typeof config.model === "string" && config.model.trim()
+    ? config.model.trim()
+    : null;
+  const hasGatewayModelId = typeof model === "string" && /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9._-]+$/i.test(model);
+
+  if (!provider && !model) {
+    issues.push(`${location}.provider or ${location}.model is required`);
+  } else if (!provider && model && !hasGatewayModelId) {
+    issues.push(
+      `${location}.provider is required unless ${location}.model is a gateway model id like 'anthropic/claude-sonnet-4.6'`,
+    );
+  }
+
+  if (provider === "gateway" && model && !hasGatewayModelId) {
+    issues.push(`${location}.model must be a gateway model id like 'anthropic/claude-sonnet-4.6'`);
   }
 
   const router = config.router ?? false;
@@ -219,7 +235,7 @@ function validateLlmConfig(config, location, issues) {
     issues.push(`${location}.router must be a boolean`);
   }
 
-  if (router !== true && (typeof config.model !== "string" || !config.model.trim())) {
+  if (router !== true && !model) {
     issues.push(`${location}.model is required when router is false`);
   }
 }
@@ -560,10 +576,11 @@ export function validateSkill(definition, options = {}) {
     }
   }
 
-  const llmSteps = workflow.steps.filter((step) => step.kind === "llm");
-  if (llmSteps.length > 0 && !metadata.llm && llmSteps.some((step) => !step.llm)) {
-    issues.push("metadata.llm is required when llm steps do not declare their own llm config");
-  }
+  // Note: a missing `metadata.llm` on a skill with llm steps is *not* an error.
+  // The runtime auto-selects a zero-install path when llm config omits a
+  // provider: Claude Code when `claude` is on PATH, otherwise AI Gateway when
+  // AI_GATEWAY_API_KEY is available. Gateway-style model ids such as
+  // `anthropic/claude-sonnet-4.6` are also valid without an explicit provider.
 
   for (const step of workflow.steps) {
     if (step.kind !== "parallel" || !Array.isArray(step.steps)) {

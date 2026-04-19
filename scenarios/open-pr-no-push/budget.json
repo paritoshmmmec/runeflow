@@ -1,0 +1,10 @@
+{
+  "_comment": "Minimum-surface concepts this scenario should need. Anything outside this set means the author reached for a feature the scenario doesn't require. Lower is better.",
+  "concepts": [
+    "interpolation",
+    "schema.llm",
+    "step.cli",
+    "step.llm"
+  ],
+  "max_cycles": 3
+}

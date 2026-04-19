@@ -203,6 +203,18 @@ function buildFixtureFromRun(run, definition) {
 async function executeRun(target, options = {}) {
   const source = await fs.readFile(path.resolve(process.cwd(), target), "utf8");
   const definition = parseRuneflow(source, { sourcePath: target });
+
+  // --provider / --model override: inject into metadata.llm so every llm
+  // step picks it up. Step-level `llm:` declarations still win locally.
+  if (options.provider || options.model) {
+    definition.metadata = definition.metadata ?? {};
+    definition.metadata.llm = {
+      ...(definition.metadata.llm ?? {}),
+      ...(options.provider ? { provider: options.provider } : {}),
+      ...(options.model ? { model: options.model } : {}),
+    };
+  }
+
   const runtime = await loadRuntime(options.runtime);
   const input = await loadInput(options.input);
   const promptValues = await loadInput(options.prompt);
@@ -276,7 +288,7 @@ export async function runCli(argv) {
                [--provider <provider>] [--model <model>]
                [--no-local-llm] [--no-polish] [--force]
   runeflow validate <file> [--runtime ./runtime.js] [--format json] [--watch]
-  runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--no-stream] [--verbose] [--telemetry] [--telemetry-output <path>]
+  runeflow run <file> --input '{"key":"value"}' [--provider <name>] [--model <name>] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--force] [--record-fixture <path>] [--no-stream] [--verbose] [--telemetry] [--telemetry-output <path>]
   runeflow test <file> --fixture <fixture.json> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}]
   runeflow resume <file> [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--prompt '{"step":"answer"}']
   runeflow watch <file> [--input '{"key":"value"}'] [--runtime ./runtime.js] [--runs-dir ./${DEFAULT_RUNS_DIR}] [--cron "0 9 * * 1-5"] [--on-change "src/**/*.js"]

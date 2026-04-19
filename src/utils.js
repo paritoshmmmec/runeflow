@@ -82,6 +82,7 @@ export function getByPath(value, segments) {
  */
 const DEFAULT_ENV_ALLOWLIST = new Set([
   // LLM provider keys — needed for composio / MCP auth
+  "AI_GATEWAY_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "CEREBRAS_API_KEY",

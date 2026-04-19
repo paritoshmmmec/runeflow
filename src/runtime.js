@@ -191,16 +191,23 @@ function resolveLlmConfig(definition, step) {
 
 async function invokeLlm(definition, step, resolvedPrompt, resolvedInput, runtime, state, options = {}) {
   const llmConfig = resolveLlmConfig(definition, step);
+  const requiresAutoHandler = !llmConfig?.provider;
 
-  if (!llmConfig) {
-    throw new RuntimeError(`Step '${step.id}' has no llm configuration.`);
-  }
-
-  const provider = llmConfig.provider;
+  // When no llm config is declared anywhere, let the runtime's auto-select
+  // kick in via the sentinel handler. The default runtime registers `_auto`
+  // pointing to the same handler; custom runtimes can do the same if they
+  // want auto-selection behavior.
+  const provider = llmConfig?.provider ?? "_auto";
   const handler = runtime.llms?.[provider];
 
   if (typeof handler !== "function") {
-    throw new RuntimeError(`No LLM handler registered for provider '${provider}'.`);
+    throw new RuntimeError(
+      llmConfig?.provider
+        ? `No LLM handler registered for provider '${provider}'.`
+        : requiresAutoHandler
+          ? `Step '${step.id}' relies on LLM auto-selection and this runtime has no '_auto' handler. Declare \`llm.provider\` explicitly or use the default runtime.`
+          : `Step '${step.id}' has no llm configuration and this runtime has no '_auto' handler. Declare \`llm:\` in the skill or use the default runtime.`,
+    );
   }
 
   const context = projectLlmContext(definition, step);
