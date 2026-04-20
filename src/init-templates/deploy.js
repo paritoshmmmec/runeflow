@@ -1,4 +1,5 @@
-import { slugify } from "../init-utils.js";
+import { commandForPackageScript } from "../init-utils.js";
+import { buildFrontmatter, defaultSkillName } from "./helpers.js";
 
 export const template = {
   id: "deploy",
@@ -8,45 +9,46 @@ export const template = {
     keywords: [{ value: "deploy", weight: 20 }, { value: "production", weight: 15 }],
   },
   generate(signals, options = {}) {
-    const provider = options.provider ?? "cerebras";
-    const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
-    const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
-    const skillName = options.name ?? `${repoSlug}deploy`;
+    const skillName = defaultSkillName("deploy", options);
 
     const scripts = signals.scripts ?? [];
     const buildScript = scripts.find((s) => s === "build") ?? "build";
     const deployScript = scripts.find((s) => s === "deploy") ?? "deploy";
+    const packageManager = signals.packageManager ?? "npm";
 
-    return `---
-name: ${skillName}
-description: Build and deploy to a cloud target.
-version: 0.1
-inputs:
-  environment: string
-outputs:
-  status: string
-llm:
-  provider: ${provider}
-  router: false
-  model: ${model}
----
+    const frontmatter = buildFrontmatter({
+      name: skillName,
+      description: "Build the project, run the deploy command, and summarize the outcome.",
+      inputs: { environment: "string" },
+      outputs: {
+        summary: "string",
+        build_exit_code: "number",
+        deploy_exit_code: "number",
+      },
+      llmConfig: options.llmConfig,
+    });
+
+    return `${frontmatter}
 
 # Deploy
 
-Build the project and deploy to the target environment.
+Run the repo's build and deploy scripts, then summarize what happened. The CLI
+steps intentionally allow failure so the final LLM step can explain both
+successes and failures without losing the command output.
 
 \`\`\`runeflow
-step build type=cli {
-  command: "npm run ${buildScript}"
+step build type=cli allow_failure=true {
+  command: "${commandForPackageScript(packageManager, buildScript)}"
 }
 
-step deploy type=cli {
-  command: "npm run ${deployScript}"
+step deploy type=cli allow_failure=true {
+  command: "${commandForPackageScript(packageManager, deployScript)}"
 }
 
 step summarize type=llm {
   prompt: |
     Summarize the deployment to {{ inputs.environment }}.
+    Call out whether the build or deploy command failed.
 
     Build output:
     {{ steps.build.stdout }}
@@ -55,17 +57,13 @@ step summarize type=llm {
     Deploy output:
     {{ steps.deploy.stdout }}
     Deploy exit code: {{ steps.deploy.exit_code }}
-  schema: { status: string }
-}
-
-step finish type=tool {
-  tool: util.complete
-  with: { status: steps.summarize.status }
-  out: { status: string }
+  schema: { summary: string }
 }
 
 output {
-  status: steps.finish.status
+  summary: steps.summarize.summary
+  build_exit_code: steps.build.exit_code
+  deploy_exit_code: steps.deploy.exit_code
 }
 \`\`\`
 `;

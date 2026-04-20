@@ -3,9 +3,6 @@ import { parseRuneflow } from "./parser.js";
 import { validateRuneflow } from "./validator.js";
 import { slugify } from "./init-utils.js";
 
-const DEFAULT_PROVIDER = "cerebras";
-const DEFAULT_MODEL = "qwen-3-235b-a22b-instruct-2507";
-
 // Built-in tool names available in the Runeflow runtime
 const BUILTIN_TOOLS = new Set([
   "file.exists",
@@ -214,7 +211,7 @@ function buildLlmStep(stepId, prompt, schema) {
 /**
  * Build the fallback skeleton when conversion would fail validation.
  */
-function buildFallbackSkeleton(source, skillName, slug, description, sourcePath, provider, model) {
+function buildFallbackSkeleton(source, skillName, slug, description, sourcePath, llmConfig) {
   const escapedContent = source.replace(/-->/g, "--&gt;");
   const frontmatter = [
     "---",
@@ -224,9 +221,13 @@ function buildFallbackSkeleton(source, skillName, slug, description, sourcePath,
     "inputs: {}",
     "outputs:",
     "  result: string",
-    "llm:",
-    `  provider: ${provider}`,
-    `  model: ${model}`,
+    ...(llmConfig?.provider || llmConfig?.model
+      ? [
+          "llm:",
+          ...(llmConfig.provider ? [`  provider: ${llmConfig.provider}`] : []),
+          ...(llmConfig.model ? [`  model: ${llmConfig.model}`] : []),
+        ]
+      : []),
     "---",
   ].join("\n");
 
@@ -252,14 +253,17 @@ function buildFallbackSkeleton(source, skillName, slug, description, sourcePath,
  * @param {string} source        - raw Markdown content of the Claude skill file
  * @param {object} options
  * @param {string} options.sourcePath
- * @param {string} [options.provider]  - resolved provider name (default: "cerebras")
- * @param {string} [options.model]     - resolved model identifier
+ * @param {{ provider?: string, model?: string } | null} [options.llmConfig]
  * @returns {{ output: string, skillName: string, warnings: string[], valid: boolean }}
  */
 export function convertClaudeSkill(source, options = {}) {
   const sourcePath = options.sourcePath ?? "unknown.md";
-  const provider = options.provider ?? DEFAULT_PROVIDER;
-  const model = options.model ?? DEFAULT_MODEL;
+  const llmConfig = options.llmConfig
+    ? {
+        ...(options.llmConfig.provider ? { provider: options.llmConfig.provider } : {}),
+        ...(options.llmConfig.model ? { model: options.llmConfig.model } : {}),
+      }
+    : null;
 
   const warnings = [];
 
@@ -400,7 +404,15 @@ export function convertClaudeSkill(source, options = {}) {
   ];
 
   if (needsLlm) {
-    frontmatterLines.push(`llm:\n  provider: ${provider}\n  model: ${model}`);
+    if (llmConfig?.provider || llmConfig?.model) {
+      frontmatterLines.push("llm:");
+      if (llmConfig.provider) {
+        frontmatterLines.push(`  provider: ${llmConfig.provider}`);
+      }
+      if (llmConfig.model) {
+        frontmatterLines.push(`  model: ${llmConfig.model}`);
+      }
+    }
   }
 
   frontmatterLines.push("---");
@@ -435,7 +447,7 @@ export function convertClaudeSkill(source, options = {}) {
   // 7. Fall back to skeleton if validation fails
   if (!valid) {
     warnings.push("Conversion produced invalid skill — falling back to minimal valid skeleton");
-    const fallback = buildFallbackSkeleton(source, skillName, slug, description, sourcePath, provider, model);
+    const fallback = buildFallbackSkeleton(source, skillName, slug, description, sourcePath, llmConfig);
     return {
       output: fallback,
       skillName,

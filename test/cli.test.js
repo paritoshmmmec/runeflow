@@ -25,6 +25,10 @@ async function captureStdout(fn) {
   return lines.join("\n");
 }
 
+function skillPath(tempDir, name) {
+  return path.join(tempDir, ".runeflow", "skills", `${name}.md`);
+}
+
 test("runCli inspect-run reads artifacts from the default runeflow runs directory", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-cli-"));
   const originalCwd = process.cwd();
@@ -273,7 +277,7 @@ output {
   }
 });
 
-test("runCli init: creates skill file and runtime.js non-interactively", async () => {
+test("runCli init: creates a discoverable skill non-interactively", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-init-"));
   const originalCwd = process.cwd();
 
@@ -290,7 +294,7 @@ test("runCli init: creates skill file and runtime.js non-interactively", async (
       noLocalLlm: true,
     });
 
-    const skillContent = await fs.readFile(path.join(tempDir, "my-skill.md"), "utf8");
+    const skillContent = await fs.readFile(skillPath(tempDir, "my-skill"), "utf8");
 
     assert.ok(skillContent.includes("name: my-skill"));
     assert.ok(skillContent.includes("provider: cerebras"));
@@ -308,7 +312,8 @@ test("parseOptions: --force without a value is treated as boolean true", async (
   const originalCwd = process.cwd();
 
   // Pre-create the skill file so --force is needed to overwrite
-  await fs.writeFile(path.join(tempDir, "my-skill.md"), "existing content");
+  await fs.mkdir(path.join(tempDir, ".runeflow", "skills"), { recursive: true });
+  await fs.writeFile(skillPath(tempDir, "my-skill"), "existing content");
 
   process.chdir(tempDir);
   try {
@@ -324,7 +329,7 @@ test("parseOptions: --force without a value is treated as boolean true", async (
       noLocalLlm: true,
     });
 
-    const content = await fs.readFile(path.join(tempDir, "my-skill.md"), "utf8");
+    const content = await fs.readFile(skillPath(tempDir, "my-skill"), "utf8");
     assert.ok(content.includes("name: my-skill"), "file was overwritten");
   } finally {
     process.chdir(originalCwd);
@@ -700,8 +705,7 @@ test("runCli init: passes --context flag to runInit", async () => {
       runCli(["init", "--context", "stripe payment", "--no-local-llm", "--no-polish", "--name", "ctx-test"]),
     );
 
-    const skillPath = path.join(tempDir, "ctx-test.md");
-    const exists = await fs.access(skillPath).then(() => true).catch(() => false);
+    const exists = await fs.access(skillPath(tempDir, "ctx-test")).then(() => true).catch(() => false);
     assert.ok(exists, "--context flag should not prevent skill creation");
   } finally {
     process.chdir(originalCwd);
@@ -719,11 +723,7 @@ test("runCli init: passes --template flag to runInit", async () => {
       runCli(["init", "--template", "notify-slack", "--no-local-llm", "--no-polish"]),
     );
 
-    const entries = await fs.readdir(tempDir);
-    const skillFiles = entries.filter((f) => f.endsWith(".md"));
-    assert.ok(skillFiles.length >= 1, "--template flag should produce a skill file");
-
-    const content = await fs.readFile(path.join(tempDir, skillFiles[0]), "utf8");
+    const content = await fs.readFile(skillPath(tempDir, "notify-slack"), "utf8");
     assert.match(content, /slack/i, "Generated skill should reference Slack when --template notify-slack");
   } finally {
     process.chdir(originalCwd);
@@ -742,8 +742,7 @@ test("runCli init: passes --no-local-llm flag to runInit", async () => {
       runCli(["init", "--no-local-llm", "--no-polish", "--name", "nollm-test"]),
     );
 
-    const skillPath = path.join(tempDir, "nollm-test.md");
-    const exists = await fs.access(skillPath).then(() => true).catch(() => false);
+    const exists = await fs.access(skillPath(tempDir, "nollm-test")).then(() => true).catch(() => false);
     assert.ok(exists, "--no-local-llm should still produce a skill file");
   } finally {
     process.chdir(originalCwd);
@@ -761,8 +760,7 @@ test("runCli init: passes --no-polish flag to runInit", async () => {
       runCli(["init", "--no-polish", "--no-local-llm", "--name", "nopolish-test"]),
     );
 
-    const skillPath = path.join(tempDir, "nopolish-test.md");
-    const exists = await fs.access(skillPath).then(() => true).catch(() => false);
+    const exists = await fs.access(skillPath(tempDir, "nopolish-test")).then(() => true).catch(() => false);
     assert.ok(exists, "--no-polish should still produce a skill file");
 
     // Should not see polish messages

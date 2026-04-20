@@ -1,4 +1,4 @@
-import { slugify } from "../init-utils.js";
+import { buildFrontmatter, defaultSkillName } from "./helpers.js";
 
 export const template = {
   id: "notify-slack",
@@ -8,46 +8,34 @@ export const template = {
     keywords: [{ value: "notify", weight: 10 }, { value: "slack", weight: 20 }],
   },
   generate(signals, options = {}) {
-    const provider = options.provider ?? "cerebras";
-    const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
-    const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
-    const skillName = options.name ?? `${repoSlug}notify-slack`;
+    const skillName = defaultSkillName("notify-slack", options);
 
-    return `---
-name: ${skillName}
-description: Draft and post a message to a Slack channel.
-version: 0.1
-inputs:
-  topic: string
-  channel: string
-outputs:
-  result: string
-llm:
-  provider: ${provider}
-  router: false
-  model: ${model}
----
+    const frontmatter = buildFrontmatter({
+      name: skillName,
+      description: "Draft a Slack-ready message about a topic for a specific channel.",
+      inputs: { topic: "string", channel: "string" },
+      outputs: { message: "string" },
+      llmConfig: options.llmConfig,
+    });
+
+    return `${frontmatter}
 
 # Notify Slack
 
-Draft a Slack message and post it to the specified channel.
+Draft a short Slack message that can be pasted into the target channel without
+extra editing. Prefer concrete status and next-step language over hype.
 
 \`\`\`runeflow
 step draft type=llm {
   prompt: |
     Draft a concise Slack message about: {{ inputs.topic }}
     Keep it under 200 characters and suitable for channel {{ inputs.channel }}.
+    Return plain text only.
   schema: { message: string }
 }
 
-step done type=tool {
-  tool: util.complete
-  with: { result: steps.draft.message }
-  out: { result: string }
-}
-
 output {
-  result: steps.done.result
+  message: steps.draft.message
 }
 \`\`\`
 `;

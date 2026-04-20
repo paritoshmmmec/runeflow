@@ -161,13 +161,18 @@ Want to silence the `runeflow: auto-selected provider=…` line? `export RUNEFLO
 
 **Generate a skill with `runeflow init`**
 
-Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.md` runeflow files — and generates a ready-to-run `.md` tailored to what it finds.
+Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.md` runeflow files — and generates a ready-to-run project skill in `.runeflow/skills/` tailored to what it finds.
 
 ```bash
 runeflow init
 ```
 
-If a cloud API key is present, the generated skill is polished by that provider. If not, a small local model (`Qwen2.5-0.5B`) is downloaded to `~/.runeflow/models/` and used instead — no sign-up required.
+If a cloud API key is present, Runeflow can lightly polish the generated docs and prompt. If not, it still scaffolds the minimal workflow directly so you can edit and run it right away:
+
+```bash
+runeflow skills list
+runeflow skills run open-pr --input '{"base_branch":"main"}'
+```
 
 **Or write one by hand:**
 
@@ -623,7 +628,7 @@ runeflow skills list
 runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 ```
 
-`init` — inspects the current directory and generates a ready-to-run `.md` skill file. Detects installed SDKs, git history, CI config, and existing runeflow files to pick the best template. Pass `--context` for a hint, `--template` to force one, or `--no-local-llm` to skip the local model download.
+`init` — inspects the current directory and generates a ready-to-run `.md` skill in `.runeflow/skills/`. Detects installed SDKs, git history, CI config, and existing runeflow files to pick the best template. Generated workflows bias toward the minimum-surface path: `cli` first when possible, no `llm:` frontmatter unless you explicitly pin it, and follow-up commands that use `runeflow skills run`.
 
 `dryrun` — validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. Shows exactly what each step would do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders derived from the output schema.
 
@@ -982,7 +987,7 @@ await runRuneflow(definition, inputs, runtime, {
 
 ## Skill discovery
 
-Project-level skills live in `.runeflow/skills/`. Any `.md` file there containing a `runeflow` block is discoverable:
+Project-level skills live in `.runeflow/skills/`. `runeflow init` writes there by default, and any `.md` file in that directory containing a `runeflow` block is discoverable:
 
 ```bash
 runeflow skills list
