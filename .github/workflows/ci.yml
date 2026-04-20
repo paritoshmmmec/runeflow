@@ -39,4 +39,5 @@ jobs:
           git config user.name "Runeflow CI"
           git commit --allow-empty -m "init" -q
           node $GITHUB_WORKSPACE/bin/runeflow.js init --no-local-llm --force
-          node $GITHUB_WORKSPACE/bin/runeflow.js validate *.md
+          node $GITHUB_WORKSPACE/bin/runeflow.js skills list
+          node $GITHUB_WORKSPACE/bin/runeflow.js validate .runeflow/skills/*.md
