@@ -119,14 +119,14 @@ async function executeAssembledStep(step, state, definition, environment, option
   }
 
   if (step.kind === "llm") {
-    const llmConfig = step.llm ?? definition.metadata.llm;
-    if (!llmConfig) {
-      throw new RuntimeError(`Step '${step.id}' has no llm configuration.`);
-    }
-    const handler = llms?.[llmConfig.provider];
+    const llmConfig = step.llm ?? definition.metadata.llm ?? null;
+    const provider = llmConfig?.provider ?? "_auto";
+    const handler = llms?.[provider];
     if (typeof handler !== "function") {
       throw new RuntimeError(
-        `No LLM handler registered for provider '${llmConfig.provider}'. Pass --runtime to provide LLM handlers.`,
+        llmConfig?.provider
+          ? `No LLM handler registered for provider '${llmConfig.provider}'. Pass --runtime to provide custom LLM handlers.`
+          : `Step '${step.id}' relies on LLM auto-selection and this runtime has no '_auto' handler. Declare \`llm.provider\` explicitly or use the default runtime.`,
       );
     }
     const resolvedPrompt = resolveBindings(step.prompt, state);
@@ -149,7 +149,7 @@ async function executeAssembledStep(step, state, definition, environment, option
       kind: step.kind,
       status: "success",
       outputs: deepClone(outputs),
-      provider: llmConfig.provider,
+      provider,
     };
   }
 

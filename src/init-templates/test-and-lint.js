@@ -1,4 +1,5 @@
-import { slugify } from "../init-utils.js";
+import { commandForPackageScript } from "../init-utils.js";
+import { buildFrontmatter, defaultSkillName } from "./helpers.js";
 
 export const template = {
   id: "test-and-lint",
@@ -11,45 +12,46 @@ export const template = {
     ],
   },
   generate(signals, options = {}) {
-    const provider = options.provider ?? "cerebras";
-    const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
-    const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
-    const skillName = options.name ?? `${repoSlug}test-and-lint`;
+    const skillName = defaultSkillName("test-and-lint", options);
 
     // Use actual script names from signals if available
     const scripts = signals.scripts ?? [];
     const testScript = scripts.find((s) => s === "test" || s === "tests") ?? "test";
     const lintScript = scripts.find((s) => s === "lint" || s === "eslint") ?? "lint";
+    const packageManager = signals.packageManager ?? "npm";
 
-    return `---
-name: ${skillName}
-description: Run tests and linter, then summarize results.
-version: 0.1
-inputs: {}
-outputs:
-  summary: string
-llm:
-  provider: ${provider}
-  router: false
-  model: ${model}
----
+    const frontmatter = buildFrontmatter({
+      name: skillName,
+      description: "Run the repo's test and lint scripts and summarize the results.",
+      inputs: {},
+      outputs: {
+        summary: "string",
+        test_exit_code: "number",
+        lint_exit_code: "number",
+      },
+      llmConfig: options.llmConfig,
+    });
+
+    return `${frontmatter}
 
 # Test and Lint
 
-Run the test suite and linter, then produce a summary of results.
+Run the test suite and linter, then produce a concise summary. The CLI steps
+allow failure so the workflow can still collect output and explain what broke.
 
 \`\`\`runeflow
-step run_tests type=cli {
-  command: "npm run ${testScript}"
+step run_tests type=cli allow_failure=true {
+  command: "${commandForPackageScript(packageManager, testScript)}"
 }
 
-step run_lint type=cli {
-  command: "npm run ${lintScript}"
+step run_lint type=cli allow_failure=true {
+  command: "${commandForPackageScript(packageManager, lintScript)}"
 }
 
 step summarize type=llm {
   prompt: |
     Summarize the test and lint results.
+    Call out any failures first, then the most important clean signals.
 
     Test output:
     {{ steps.run_tests.stdout }}
@@ -61,14 +63,10 @@ step summarize type=llm {
   schema: { summary: string }
 }
 
-step finish type=tool {
-  tool: util.complete
-  with: { summary: steps.summarize.summary }
-  out: { summary: string }
-}
-
 output {
-  summary: steps.finish.summary
+  summary: steps.summarize.summary
+  test_exit_code: steps.run_tests.exit_code
+  lint_exit_code: steps.run_lint.exit_code
 }
 \`\`\`
 `;

@@ -1,53 +1,36 @@
 /**
- * runeflow init — smarter-init orchestrator.
+ * runeflow init
  *
  * Orchestration sequence:
- *   1. Inspect repo (signals)
- *   2. Resolve provider/model
- *   3a. Conversion_Mode — if Claude skill files detected
- *   3b. Generation_Mode — heuristic template selection
+ *   1. Inspect the repo for signals
+ *   2. Optionally resolve a cloud provider for polish
+ *   3a. Convert Claude-style Markdown skills into Runeflow skills
+ *   3b. Generate a new Runeflow skill from a heuristic template
  *
- * Writes:
- *   <slug>.md   — the skill file (or converted files)
- *   runtime.js           — runtime wired to the resolved provider
+ * Writes project-level skills into `.runeflow/skills/` so they are immediately
+ * discoverable via `runeflow skills list` and runnable via `runeflow skills run`.
  */
 
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
-import https from "node:https";
-import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-import { inspectRepo } from "./init-inspector.js";
 import { convertClaudeSkill } from "./init-converter.js";
 import { selectTemplate, reselectWithAnswer } from "./init-heuristics.js";
+import { inspectRepo } from "./init-inspector.js";
 import { getTemplate } from "./init-templates/index.js";
+import { buildExampleInput, getSkillsDir, slugify } from "./init-utils.js";
 import { parseRuneflow } from "./parser.js";
 import { validateRuneflow } from "./validator.js";
-import { slugify } from "./init-utils.js";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const CLOUD_PROVIDERS = [
-  { envKey: "CEREBRAS_API_KEY",            provider: "cerebras", model: "qwen-3-235b-a22b-instruct-2507" },
-  { envKey: "OPENAI_API_KEY",              provider: "openai",   model: "gpt-4o" },
-  { envKey: "ANTHROPIC_API_KEY",           provider: "anthropic", model: "claude-3-7-sonnet-latest" },
-  { envKey: "GROQ_API_KEY",               provider: "groq",     model: "llama-3.3-70b-versatile" },
-  { envKey: "MISTRAL_API_KEY",            provider: "mistral",  model: "mistral-large-latest" },
+  { envKey: "CEREBRAS_API_KEY", provider: "cerebras", model: "qwen-3-235b-a22b-instruct-2507" },
+  { envKey: "OPENAI_API_KEY", provider: "openai", model: "gpt-4o" },
+  { envKey: "ANTHROPIC_API_KEY", provider: "anthropic", model: "claude-3-7-sonnet-latest" },
+  { envKey: "GROQ_API_KEY", provider: "groq", model: "llama-3.3-70b-versatile" },
+  { envKey: "MISTRAL_API_KEY", provider: "mistral", model: "mistral-large-latest" },
   { envKey: "GOOGLE_GENERATIVE_AI_API_KEY", provider: "google", model: "gemini-2.0-flash" },
 ];
-
-const LOCAL_MODEL_NAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
-const LOCAL_MODEL_URL = `https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/${LOCAL_MODEL_NAME}`;
-const LOCAL_MODEL_CACHE_DIR = path.join(os.homedir(), ".runeflow", "models");
-const LOCAL_MODEL_PATH = path.join(LOCAL_MODEL_CACHE_DIR, LOCAL_MODEL_NAME);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function ask(rl, question) {
   return new Promise((resolve) => {
@@ -59,32 +42,41 @@ async function fileExists(filePath) {
   return fs.access(filePath).then(() => true).catch(() => false);
 }
 
-// ---------------------------------------------------------------------------
-// Provider resolution
-// ---------------------------------------------------------------------------
+function buildExplicitLlmConfig(options) {
+  const llmConfig = {};
 
-function resolveProvider(options) {
-  // 1. Explicit flag takes priority
-  if (options.provider) {
-    const knownProvider = CLOUD_PROVIDERS.find((p) => p.provider === options.provider);
-    const model = options.model ?? knownProvider?.model ?? "unknown";
-    return { provider: options.provider, model, isCloud: !!knownProvider };
+  if (typeof options.provider === "string" && options.provider.trim()) {
+    llmConfig.provider = options.provider.trim();
   }
 
-  // 2. Check env keys in priority order
+  if (typeof options.model === "string" && options.model.trim()) {
+    llmConfig.model = options.model.trim();
+  }
+
+  return Object.keys(llmConfig).length > 0 ? llmConfig : null;
+}
+
+function resolvePolishProvider(options) {
+  if (typeof options.provider === "string" && options.provider.trim()) {
+    const knownProvider = CLOUD_PROVIDERS.find((entry) => entry.provider === options.provider.trim());
+    if (!knownProvider) {
+      return { provider: null, model: null };
+    }
+
+    return {
+      provider: knownProvider.provider,
+      model: options.model ?? knownProvider.model,
+    };
+  }
+
   for (const { envKey, provider, model } of CLOUD_PROVIDERS) {
     if (process.env[envKey]) {
-      return { provider, model, isCloud: true };
+      return { provider, model };
     }
   }
 
-  // 3. No key found — use local
-  return { provider: "local", model: LOCAL_MODEL_NAME, isCloud: false };
+  return { provider: null, model: null };
 }
-
-// ---------------------------------------------------------------------------
-// LLM Polisher (inline)
-// ---------------------------------------------------------------------------
 
 async function polishSkill(content, { provider, model, log }) {
   log(`✨ Polishing with ${provider}...`);
@@ -93,25 +85,47 @@ async function polishSkill(content, { provider, model, log }) {
     const { generateObject } = await import("ai");
     const { z } = await import("zod");
 
-    // Lazy-load the provider factory
     const FACTORIES = {
-      cerebras:  async (key) => { const { createCerebras }  = await import("@ai-sdk/cerebras");  return createCerebras({ apiKey: key })(model); },
-      openai:    async (key) => { const { createOpenAI }    = await import("@ai-sdk/openai");    return createOpenAI({ apiKey: key })(model); },
-      anthropic: async (key) => { const { createAnthropic } = await import("@ai-sdk/anthropic"); return createAnthropic({ apiKey: key })(model); },
-      groq:      async (key) => { const { createGroq }      = await import("@ai-sdk/groq");      return createGroq({ apiKey: key })(model); },
-      mistral:   async (key) => { const { createMistral }   = await import("@ai-sdk/mistral");   return createMistral({ apiKey: key })(model); },
-      google:    async (key) => { const { createGoogleGenerativeAI } = await import("@ai-sdk/google"); return createGoogleGenerativeAI({ apiKey: key })(model); },
+      cerebras: async (key) => {
+        const { createCerebras } = await import("@ai-sdk/cerebras");
+        return createCerebras({ apiKey: key })(model);
+      },
+      openai: async (key) => {
+        const { createOpenAI } = await import("@ai-sdk/openai");
+        return createOpenAI({ apiKey: key })(model);
+      },
+      anthropic: async (key) => {
+        const { createAnthropic } = await import("@ai-sdk/anthropic");
+        return createAnthropic({ apiKey: key })(model);
+      },
+      groq: async (key) => {
+        const { createGroq } = await import("@ai-sdk/groq");
+        return createGroq({ apiKey: key })(model);
+      },
+      mistral: async (key) => {
+        const { createMistral } = await import("@ai-sdk/mistral");
+        return createMistral({ apiKey: key })(model);
+      },
+      google: async (key) => {
+        const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+        return createGoogleGenerativeAI({ apiKey: key })(model);
+      },
+    };
+
+    const envKeyMap = {
+      cerebras: "CEREBRAS_API_KEY",
+      openai: "OPENAI_API_KEY",
+      anthropic: "ANTHROPIC_API_KEY",
+      groq: "GROQ_API_KEY",
+      mistral: "MISTRAL_API_KEY",
+      google: "GOOGLE_GENERATIVE_AI_API_KEY",
     };
 
     const factory = FACTORIES[provider];
-    if (!factory) return content;
-
-    const envKeyMap = {
-      cerebras: "CEREBRAS_API_KEY", openai: "OPENAI_API_KEY", anthropic: "ANTHROPIC_API_KEY",
-      groq: "GROQ_API_KEY", mistral: "MISTRAL_API_KEY", google: "GOOGLE_GENERATIVE_AI_API_KEY",
-    };
     const apiKey = process.env[envKeyMap[provider]];
-    if (!apiKey) return content;
+    if (!factory || !apiKey) {
+      return content;
+    }
 
     const llmModel = await factory(apiKey);
 
@@ -135,178 +149,126 @@ ${content}
   }
 }
 
-async function tryPolish(content, { provider, model, isCloud, noPolish, log }) {
-  if (noPolish || !isCloud) return content;
+async function tryPolish(content, { provider, model, noPolish, log }) {
+  if (noPolish || !provider || !model) {
+    return content;
+  }
 
   try {
     const polished = await polishSkill(content, { provider, model, log });
-    // Validate polished output
     const parsed = parseRuneflow(polished);
     const result = validateRuneflow(parsed);
+
     if (!result.valid) {
-      log("⚠️  Polish produced invalid skill — using original.");
+      log("⚠️  Polish produced invalid output. Keeping the base scaffold.");
       return content;
     }
+
     return polished;
   } catch {
-    log("⚠️  Polish failed — using original.");
+    log("⚠️  Polish failed. Keeping the base scaffold.");
     return content;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Local model download
-// ---------------------------------------------------------------------------
-
-async function downloadModel(log) {
-  await fs.mkdir(LOCAL_MODEL_CACHE_DIR, { recursive: true });
-
-  return new Promise((resolve, reject) => {
-    const file = fsSync.createWriteStream(LOCAL_MODEL_PATH);
-
-    function doRequest(url, redirectCount = 0) {
-      if (redirectCount > 5) {
-        file.destroy();
-        fsSync.unlink(LOCAL_MODEL_PATH, () => {});
-        reject(new Error("Too many redirects downloading model"));
-        return;
-      }
-
-      https.get(url, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume(); // drain and release the socket
-          doRequest(res.headers.location, redirectCount + 1);
-          return;
-        }
-
-        if (res.statusCode !== 200) {
-          res.resume();
-          file.destroy();
-          fsSync.unlink(LOCAL_MODEL_PATH, () => {});
-          reject(new Error(`Model download failed: HTTP ${res.statusCode}`));
-          return;
-        }
-
-        const total = parseInt(res.headers["content-length"] ?? "0", 10);
-        let received = 0;
-
-        res.on("data", (chunk) => {
-          received += chunk.length;
-          if (total > 0) {
-            const pct = Math.round((received / total) * 100);
-            const receivedMb = Math.round(received / 1024 / 1024);
-            const totalMb = Math.round(total / 1024 / 1024);
-            process.stdout.write(`\rDownloading ${LOCAL_MODEL_NAME} ... ${pct}% (${receivedMb} MB / ${totalMb} MB)`);
-          }
-        });
-
-        res.pipe(file);
-
-        file.on("finish", () => {
-          file.close();
-          process.stdout.write("\n");
-          resolve();
-        });
-      }).on("error", (err) => {
-        file.destroy();
-        fsSync.unlink(LOCAL_MODEL_PATH, () => {});
-        reject(err);
-      });
-    }
-
-    doRequest(LOCAL_MODEL_URL);
-  });
-}
-
-async function ensureLocalModel(log) {
-  if (await fileExists(LOCAL_MODEL_PATH)) {
-    return true; // already cached
-  }
-
-  log(`Downloading local model to ${LOCAL_MODEL_PATH} ...`);
-  try {
-    await downloadModel(log);
-    log(`✅ Model cached at ${LOCAL_MODEL_PATH}`);
-    return true;
-  } catch (err) {
-    log(`⚠️  Model download failed: ${err.message}`);
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// runtime.js content builders
-// ---------------------------------------------------------------------------
-
-function buildLocalRuntime() {
-  return `import { createDefaultRuntime } from "runeflow";
-import { getLlama, LlamaChatSession } from "node-llama-cpp";
-import path from "node:path";
-import os from "node:os";
-
-const modelPath = path.join(os.homedir(), ".runeflow", "models", "qwen2.5-0.5b-instruct-q4_k_m.gguf");
-
-async function localHandler({ prompt, schema }) {
-  const llama = await getLlama();
-  const model = await llama.loadModel({ modelPath });
-  const context = await model.createContext();
-  const session = new LlamaChatSession({ contextSequence: context.getSequence() });
-  const response = await session.prompt(prompt);
-  return JSON.parse(response);
-}
-
-const base = createDefaultRuntime();
-export default { ...base, llms: { ...base.llms, local: localHandler } };
-`;
-}
-
-function buildPlaceholderRuntime() {
-  return `import { createDefaultRuntime } from "runeflow";
-
-// TODO: Configure your LLM provider
-// Install: npm install @ai-sdk/cerebras (or your preferred provider)
-// Set: CEREBRAS_API_KEY=your-key (or equivalent)
-
-export default createDefaultRuntime();
-`;
-}
-
-// ---------------------------------------------------------------------------
-// Extract skill name from generated .md frontmatter
-// ---------------------------------------------------------------------------
 
 function extractSkillNameFromContent(content) {
   const match = content.match(/^---\n[\s\S]*?^name:\s*(.+)$/m);
   return match ? match[1].trim() : null;
 }
 
-// ---------------------------------------------------------------------------
-// Conversion_Mode
-// ---------------------------------------------------------------------------
+function validateGeneratedContent(content) {
+  const parsed = parseRuneflow(content);
+  const result = validateRuneflow(parsed);
+  if (!result.valid) {
+    throw new Error(`Generated skill is invalid: ${result.issues.join("; ")}`);
+  }
+  return parsed;
+}
 
-async function runConversionMode(signals, options, { provider, model, isCloud, isTTY, log, cwd }) {
-  const { claudeSkillFiles } = signals;
+function toDisplayPath(cwd, targetPath) {
+  const relativePath = path.relative(cwd, targetPath);
+  if (!relativePath || relativePath === "") {
+    return ".";
+  }
+  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+}
+
+function buildRunCommand(filePath, parsed) {
+  const skillStem = path.basename(filePath, ".md");
+  const exampleInput = buildExampleInput(parsed.metadata.inputs ?? {});
+  return `runeflow skills run ${skillStem} --input '${JSON.stringify(exampleInput)}'`;
+}
+
+async function maybeLogAgentsHint(cwd, log) {
+  const agentsPath = path.join(cwd, "AGENTS.md");
+  const agentsContent = await fs.readFile(agentsPath, "utf8").catch(() => null);
+
+  if (agentsContent && agentsContent.includes(".runeflow/skills/")) {
+    return;
+  }
+
+  log("");
+  log("Tip: add this to AGENTS.md so project skills are easy for agents to discover:");
+  log("  ## Runeflow Skills");
+  log("  Skills are in `.runeflow/skills/`. Run `runeflow skills list` to see available workflows.");
+}
+
+function logNextSteps(cwd, log, filePath, parsed, options = {}) {
+  const displayPath = toDisplayPath(cwd, filePath);
+
+  log("");
+  log("Next:");
+  log("  runeflow skills list");
+  log(`  runeflow validate ${displayPath}`);
+  log(`  ${buildRunCommand(filePath, parsed)}`);
+
+  if (options.selectionId === "generic-llm-task") {
+    log(`  Edit ${displayPath} to tighten the prompt and schema before first run.`);
+  }
+
+  if (options.warningCount > 0) {
+    log(`  Review ${displayPath}; ${options.warningCount} conversion warning(s) need manual attention.`);
+  }
+}
+
+async function writeSkillFile(content, skillName, cwd, force) {
+  const skillsDir = getSkillsDir(cwd);
+  await fs.mkdir(skillsDir, { recursive: true });
+
+  const filePath = path.join(skillsDir, `${skillName}.md`);
+  if (await fileExists(filePath) && !force) {
+    throw new Error(`${path.basename(filePath)} already exists in .runeflow/skills/. Use --force to overwrite.`);
+  }
+
+  await fs.writeFile(filePath, content, "utf8");
+  return filePath;
+}
+
+async function runConversionMode(signals, options, ctx) {
+  const { cwd, isTTY, log, polishProvider, polishModel, llmConfig } = ctx;
   const { noPolish, force } = options;
+  const { claudeSkillFiles } = signals;
 
   let filesToConvert = claudeSkillFiles;
 
   if (isTTY && claudeSkillFiles.length > 0) {
-    log("\nDetected Claude skill files:");
-    claudeSkillFiles.forEach((f, i) => {
-      log(`  ${i + 1}. ${f.relativePath} — ${f.title}`);
+    log("");
+    log("Detected Claude-style Markdown files:");
+    claudeSkillFiles.forEach((file, index) => {
+      log(`  ${index + 1}. ${file.relativePath} - ${file.title}`);
     });
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
-      const answer = await ask(
-        rl,
-        `\nWhich files to convert? (comma-separated numbers, or press Enter for all)`,
-      );
-
+      const answer = await ask(rl, "Which files should Runeflow convert? (comma-separated numbers, or Enter for all)");
       if (answer.trim()) {
-        const indices = answer.split(",").map((s) => parseInt(s.trim(), 10) - 1).filter((i) => i >= 0 && i < claudeSkillFiles.length);
-        if (indices.length > 0) {
-          filesToConvert = indices.map((i) => claudeSkillFiles[i]);
+        const indexes = answer
+          .split(",")
+          .map((value) => Number.parseInt(value.trim(), 10) - 1)
+          .filter((value) => value >= 0 && value < claudeSkillFiles.length);
+
+        if (indexes.length > 0) {
+          filesToConvert = indexes.map((index) => claudeSkillFiles[index]);
         }
       }
     } finally {
@@ -315,71 +277,53 @@ async function runConversionMode(signals, options, { provider, model, isCloud, i
   }
 
   const writtenPaths = [];
-  const summaryLines = [];
 
   for (const skillFile of filesToConvert) {
     const source = await fs.readFile(skillFile.path, "utf8").catch(() => null);
     if (source === null) {
-      log(`⚠️  Could not read ${skillFile.relativePath} — skipping`);
+      log(`⚠️  Could not read ${skillFile.relativePath}; skipping.`);
       continue;
     }
 
-    const result = convertClaudeSkill(source, {
+    const converted = convertClaudeSkill(source, {
       sourcePath: skillFile.relativePath,
-      provider,
-      model,
+      llmConfig,
     });
 
-    let content = result.output;
+    const content = await tryPolish(converted.output, {
+      provider: polishProvider,
+      model: polishModel,
+      noPolish,
+      log,
+    });
 
-    // Optionally polish
-    content = await tryPolish(content, { provider, model, isCloud, noPolish, log });
+    const parsed = validateGeneratedContent(content);
+    const skillName = slugify(extractSkillNameFromContent(content) ?? path.basename(skillFile.path, ".md"));
+    const filePath = await writeSkillFile(content, skillName, cwd, force);
+    writtenPaths.push(filePath);
 
-    // Determine output filename
-    const baseName = path.basename(skillFile.path, ".md");
-    const outFile = path.join(cwd, `${baseName}.md`);
+    log(`✅ Created ${toDisplayPath(cwd, filePath)} from ${skillFile.relativePath}`);
 
-    if (await fileExists(outFile) && !force) {
-      throw new Error(`${path.basename(outFile)} already exists. Use --force to overwrite.`);
+    for (const warning of converted.warnings) {
+      log(`  ⚠️  ${warning}`);
     }
 
-    await fs.writeFile(outFile, content, "utf8");
-    writtenPaths.push(outFile);
-    log(`✅ Created ${outFile}`);
-
-    const warningNote = result.warnings.length > 0
-      ? ` (${result.warnings.length} warning(s) — manual attention needed)`
-      : "";
-    summaryLines.push(`  ${skillFile.relativePath} → ${path.basename(outFile)}${warningNote}`);
-
-    if (result.warnings.length > 0) {
-      for (const w of result.warnings) {
-        log(`  ⚠️  ${w}`);
-      }
-    }
+    logNextSteps(cwd, log, filePath, parsed, {
+      warningCount: converted.warnings.length,
+    });
   }
 
-  log("\n📋 Conversion summary:");
-  for (const line of summaryLines) {
-    log(line);
-  }
-
+  await maybeLogAgentsHint(cwd, log);
   return writtenPaths;
 }
 
-// ---------------------------------------------------------------------------
-// Generation_Mode
-// ---------------------------------------------------------------------------
-
-async function runGenerationMode(signals, options, { provider, model, isCloud, isTTY, log, cwd }) {
+async function runGenerationMode(signals, options, ctx) {
+  const { cwd, isTTY, log, polishProvider, polishModel, llmConfig } = ctx;
   const { noPolish, force } = options;
 
-  // Select template
   let selection = selectTemplate(signals, { forceTemplate: options.template });
-
   log(`📋 Template: ${selection.templateId}`);
 
-  // Clarifying question if not confident and TTY
   if (!selection.confident && isTTY) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
@@ -398,88 +342,60 @@ async function runGenerationMode(signals, options, { provider, model, isCloud, i
     throw new Error(`Template "${selection.templateId}" not found.`);
   }
 
-  // Generate skill content
-  let content = template.generate(signals, { provider, model, name: options.name });
+  const baseContent = template.generate(signals, {
+    name: options.name,
+    llmConfig,
+  });
 
-  // Optionally polish
-  content = await tryPolish(content, { provider, model, isCloud, noPolish, log });
+  const content = await tryPolish(baseContent, {
+    provider: polishProvider,
+    model: polishModel,
+    noPolish,
+    log,
+  });
 
-  // Derive skill filename from frontmatter name
-  const skillName = options.name
-    ? slugify(options.name)
-    : (extractSkillNameFromContent(content) ?? slugify(selection.templateId));
+  const parsed = validateGeneratedContent(content);
+  const skillName = slugify(extractSkillNameFromContent(content) ?? selection.templateId);
+  const filePath = await writeSkillFile(content, skillName, cwd, force);
 
-  const skillFile = path.join(cwd, `${skillName}.md`);
-  const runtimeFile = path.join(cwd, "runtime.js");
+  log(`✅ Created ${toDisplayPath(cwd, filePath)}`);
+  logNextSteps(cwd, log, filePath, parsed, {
+    selectionId: selection.templateId,
+  });
+  await maybeLogAgentsHint(cwd, log);
 
-  if (await fileExists(skillFile) && !force) {
-    throw new Error(`${path.basename(skillFile)} already exists. Use --force to overwrite.`);
-  }
-
-  await fs.writeFile(skillFile, content, "utf8");
-  log(`✅ Created ${skillFile}`);
-
-  // Only write runtime.js for the local provider — cloud providers work without it
-  const runtimeExists = await fileExists(runtimeFile);
-  if (provider === "local" && (!runtimeExists || force)) {
-    const runtimeContent = buildLocalRuntime();
-    await fs.writeFile(runtimeFile, runtimeContent, "utf8");
-    log(`✅ Created ${runtimeFile}`);
-  }
-
-  // Print ready-to-run command
-  const runtimeFlag = provider === "local" ? " --runtime ./runtime.js" : "";
-  log(`\nruneflow run ./${path.basename(skillFile)} --input '{}'${runtimeFlag}`);
-
-  return [skillFile, ...(provider === "local" && (!runtimeExists || force) ? [runtimeFile] : [])];
+  return [filePath];
 }
-
-// ---------------------------------------------------------------------------
-// Main export
-// ---------------------------------------------------------------------------
 
 export async function runInit(options = {}) {
   const cwd = options.cwd ?? process.cwd();
   const isTTY = process.stdin.isTTY && process.stdout.isTTY;
   const log = options.silent ? () => {} : (...args) => console.log(...args);
 
-  // Step 1: Inspect repo
   const signals = await inspectRepo({
     cwd,
     extraContext: options.context ? [options.context] : [],
   });
 
-  // Step 2: Resolve provider/model
-  let { provider, model, isCloud } = resolveProvider(options);
+  const explicitLlmConfig = buildExplicitLlmConfig(options);
+  const { provider: polishProvider, model: polishModel } = resolvePolishProvider(options);
 
-  // Handle local LLM path
-  if (provider === "local") {
-    if (options.noLocalLlm) {
-      // Use placeholder directly
-      provider = "placeholder";
-      model = "placeholder";
-      isCloud = false;
-    } else {
-      // Try to ensure local model is available
-      const modelReady = await ensureLocalModel(log);
-      if (!modelReady) {
-        log("⚠️  Falling back to placeholder provider.");
-        provider = "placeholder";
-        model = "placeholder";
-        isCloud = false;
-      } else {
-        log(`Model: ${LOCAL_MODEL_NAME}`);
-        log(`Cache: ${LOCAL_MODEL_PATH}`);
-      }
-    }
+  if (!options.noPolish && !polishProvider) {
+    log("ℹ️  No cloud provider configured for init polish. Generating the minimal scaffold directly.");
   }
 
-  const ctx = { provider, model, isCloud, isTTY, log, cwd };
+  const ctx = {
+    cwd,
+    isTTY,
+    log,
+    llmConfig: explicitLlmConfig,
+    polishProvider,
+    polishModel,
+  };
 
-  // Step 3a or 3b
   if (signals.claudeSkillFiles.length > 0) {
     return runConversionMode(signals, options, ctx);
-  } else {
-    return runGenerationMode(signals, options, ctx);
   }
+
+  return runGenerationMode(signals, options, ctx);
 }

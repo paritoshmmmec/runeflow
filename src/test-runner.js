@@ -126,6 +126,9 @@ function buildMockRuntime(mocks = {}, definition = {}) {
   providers.add("openai");
   providers.add("anthropic");
   providers.add("mock");
+  // Sentinel for skills with no `llm:` block — the runtime routes these
+  // through the _auto key; test runner should also mock them.
+  providers.add("_auto");
 
   for (const p of providers) {
     llms[p] = mockLlmHandler;

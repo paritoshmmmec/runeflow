@@ -22,7 +22,7 @@ export type SchemaValue =
 
 /** LLM configuration for a skill or step. */
 export interface LlmConfig {
-  provider: string;
+  provider?: string;
   model?: string;
   router?: boolean;
 }

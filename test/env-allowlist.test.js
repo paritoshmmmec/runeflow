@@ -66,17 +66,21 @@ test("expandEnvVars allows everything when no allowlist is passed", () => {
 test("deepExpandEnvVars expands default-listed provider keys", () => {
   _resetEnvAllowlistCache();
   delete process.env.RUNEFLOW_ENV_ALLOWLIST;
+  process.env.AI_GATEWAY_API_KEY = "test-gateway-key";
   process.env.CEREBRAS_API_KEY = "test-cerebras-key";
   process.env.GITHUB_TOKEN = "ghp-test-token";
   try {
     const result = deepExpandEnvVars({
       url: "https://api.example.com",
+      gatewayAuth: "Bearer ${AI_GATEWAY_API_KEY}",
       auth: "Bearer ${CEREBRAS_API_KEY}",
       githubAuth: "Bearer ${GITHUB_TOKEN}",
     });
+    assert.equal(result.gatewayAuth, "Bearer test-gateway-key");
     assert.equal(result.auth, "Bearer test-cerebras-key");
     assert.equal(result.githubAuth, "Bearer ghp-test-token");
   } finally {
+    delete process.env.AI_GATEWAY_API_KEY;
     delete process.env.CEREBRAS_API_KEY;
     delete process.env.GITHUB_TOKEN;
     _resetEnvAllowlistCache();

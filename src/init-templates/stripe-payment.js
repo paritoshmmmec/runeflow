@@ -1,4 +1,4 @@
-import { slugify } from "../init-utils.js";
+import { buildFrontmatter, defaultSkillName } from "./helpers.js";
 
 export const template = {
   id: "stripe-payment",
@@ -8,30 +8,29 @@ export const template = {
     keywords: [{ value: "payment", weight: 20 }, { value: "checkout", weight: 15 }],
   },
   generate(signals, options = {}) {
-    const provider = options.provider ?? "cerebras";
-    const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
-    const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
-    const skillName = options.name ?? `${repoSlug}stripe-payment`;
+    const skillName = defaultSkillName("stripe-payment", options);
 
-    return `---
-name: ${skillName}
-description: Prepare and create a Stripe payment intent or checkout session.
-version: 0.1
-inputs:
-  amount: number
-  currency: string
-  description: string
-outputs:
-  result: string
-llm:
-  provider: ${provider}
-  router: false
-  model: ${model}
----
+    const frontmatter = buildFrontmatter({
+      name: skillName,
+      description: "Draft a Stripe payment summary and payload shape from input values.",
+      inputs: {
+        amount: "number",
+        currency: "string",
+        description: "string",
+      },
+      outputs: {
+        summary: "string",
+        customer_message: "string",
+      },
+      llmConfig: options.llmConfig,
+    });
+
+    return `${frontmatter}
 
 # Stripe Payment
 
-Prepare payment details and create a Stripe payment intent.
+Prepare a payment summary that can be reviewed before creating a Stripe payment
+intent or checkout session. Keep the output concrete and customer-safe.
 
 \`\`\`runeflow
 step draft type=llm {
@@ -40,18 +39,14 @@ step draft type=llm {
     Amount: {{ inputs.amount }} {{ inputs.currency }}
     Description: {{ inputs.description }}
 
-    Summarize the payment details to confirm before processing.
-  schema: { summary: string }
-}
-
-step done type=tool {
-  tool: util.complete
-  with: { result: steps.draft.summary }
-  out: { result: string }
+    Summarize the payment details to confirm before processing and write a
+    one-paragraph customer-facing message.
+  schema: { summary: string, customer_message: string }
 }
 
 output {
-  result: steps.done.result
+  summary: steps.draft.summary
+  customer_message: steps.draft.customer_message
 }
 \`\`\`
 `;

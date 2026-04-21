@@ -18,10 +18,7 @@ const BASE_SIGNALS = {
   claudeSkillFiles: [],
 };
 
-const BASE_OPTIONS = {
-  provider: "cerebras",
-  model: "qwen-3-235b-a22b-instruct-2507",
-};
+const BASE_OPTIONS = {};
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -54,8 +51,11 @@ for (const template of templates) {
     assert.match(output, /name: [a-z0-9-]+/);
   });
 
-  test(`${template.id}: generate() substitutes provider into frontmatter`, () => {
-    const output = template.generate(BASE_SIGNALS, { ...BASE_OPTIONS, provider: "openai", model: "gpt-4o" });
+  test(`${template.id}: generate() includes pinned llm config when explicitly requested`, () => {
+    const output = template.generate(BASE_SIGNALS, {
+      ...BASE_OPTIONS,
+      llmConfig: { provider: "openai", model: "gpt-4o" },
+    });
     assert.match(output, /provider: openai/);
     assert.match(output, /model: gpt-4o/);
   });

@@ -1,4 +1,4 @@
-import { slugify } from "../init-utils.js";
+import { buildFrontmatter, defaultSkillName } from "./helpers.js";
 
 export const template = {
   id: "release-notes",
@@ -12,65 +12,48 @@ export const template = {
     ],
   },
   generate(signals, options = {}) {
-    const provider = options.provider ?? "cerebras";
-    const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
-    const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
-    const skillName = options.name ?? `${repoSlug}release-notes`;
+    const skillName = defaultSkillName("release-notes", options);
 
-    return `---
-name: ${skillName}
-description: Draft release notes from git log since the last tag.
-version: 0.1
-inputs:
-  base_ref: string
-outputs:
-  title: string
-  notes: string
-llm:
-  provider: ${provider}
-  router: false
-  model: ${model}
----
+    const frontmatter = buildFrontmatter({
+      name: skillName,
+      description: "Draft release notes from commits between a base ref and HEAD.",
+      inputs: { base_ref: "string" },
+      outputs: { title: "string", notes: "string" },
+      llmConfig: options.llmConfig,
+    });
+
+    return `${frontmatter}
 
 # Release Notes
 
-Draft structured release notes from commits since the last git tag.
+Summarize the commit history between a base ref and HEAD into clean release
+notes. The workflow grabs the latest tag for extra context but trusts the
+requested \`base_ref\` as the source of truth for the range.
 
 \`\`\`runeflow
-step get_tags type=tool {
-  tool: git.tag_list
-  out: { tags: [string], latest: string }
+step latest_tag type=cli allow_failure=true {
+  command: "git describe --tags --abbrev=0"
 }
 
-step get_log type=tool {
-  tool: git.log
-  with: { base: inputs.base_ref }
-  out: { base: string, commits: [any], count: number }
+step commits type=cli {
+  command: "git log --oneline {{ inputs.base_ref }}..HEAD"
 }
 
 step draft type=llm {
   prompt: |
     Draft release notes since {{ inputs.base_ref }}.
 
-    Latest tag: {{ steps.get_tags.latest }}
+    Latest tag:
+    {{ steps.latest_tag.stdout }}
 
-    Commits ({{ steps.get_log.count }} total):
-    {{ steps.get_log.commits }}
+    Commits:
+    {{ steps.commits.stdout }}
   schema: { title: string, notes: string }
 }
 
-step finish type=tool {
-  tool: util.complete
-  with: {
-    title: steps.draft.title,
-    notes: steps.draft.notes
-  }
-  out: { title: string, notes: string }
-}
-
 output {
-  title: steps.finish.title
-  notes: steps.finish.notes
+  title: steps.draft.title
+  notes: steps.draft.notes
 }
 \`\`\`
 `;

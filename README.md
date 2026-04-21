@@ -17,25 +17,38 @@ Runeflow lets you build executable AI skills in Markdown. Keep guidance readable
 
 ## The problem
 
-Prompt-based automations break in predictable ways. The model decides what to call, in what order, with what inputs. Retries are ad hoc. Outputs are unvalidated. Runs are invisible after the fact. When something goes wrong, there's nothing to inspect.
+Prompt-based automations break in predictable ways. The model decides what to call, in what order, and with what inputs. Retries are ad hoc. Outputs are unvalidated. Runs are hard to inspect after the fact.
 
-The root cause is that workflow logic — sequencing, branching, validation, tool calls — is hiding inside the prompt where it doesn't belong.
+The root cause is simple: workflow logic — sequencing, branching, validation, and tool calls — is hiding inside the prompt where it doesn't belong.
 
 ## The solution
 
-Runeflow moves execution semantics out of the prompt and into a small runtime. One `.md` file combines human-readable guidance with a typed, executable workflow block. The runtime owns sequencing, branching, retries, tool execution, and schema validation. The LLM sees only what it needs: a tight prompt, the relevant docs, and the output schema.
+Runeflow moves execution semantics out of the prompt and into a small runtime. One `.md` file combines human-readable guidance with a typed, executable workflow block. The runtime owns sequencing, branching, retries, tool execution, and schema validation.
 
-Prompts are good for judgment and language. They're a bad place to hide workflow logic. Runeflow puts workflow logic back in code, while keeping authoring lightweight and human-readable.
+Prompts are still used for judgment and language. They're just no longer asked to secretly be the workflow engine.
 
 ---
 
-## Why it works
+## Why Runeflow
 
-**Readable** — Markdown-first workflows live in your repo and review cleanly in diffs. Guidance for humans and execution logic for the runtime, in one file.
+**Markdown-first** — Workflows live in your repo, review cleanly in diffs, and stay readable by humans.
 
-**Reliable** — Validation, schemas, retries, and branching happen before tokens are wasted. Static preflight catches broken references and type mismatches before execution.
+**Runtime-owned execution** — Validation, retries, branching, and tool calls happen in code, not inside prompt instructions.
 
-**Agent-friendly** — Precompute context with `runeflow assemble` and hand agents only the step they need. This is how the -82% input token reduction works in practice.
+**Inspectable runs** — Every step writes an artifact, so failures are debuggable instead of mysterious.
+
+**Agent-friendly** — `runeflow assemble` can precompute context and hand an agent only the step it actually needs.
+
+## Current Status
+
+Runeflow is already useful for repo-local automation and agent preprocessing. The current product direction is:
+
+- Zero-install default LLM path: Claude Code if available, otherwise AI Gateway
+- A narrow workflow model: `cli`, `llm`, `tool`, `transform`, `branch`, `parallel`, `human_input`, `block`
+- A tight authoring loop: `validate`, `dryrun`, `run`, `inspect-run`, `test`
+- Scenario-based DX evaluation so docs and runtime changes can be measured against real authoring tasks
+
+See the [roadmap](./plans/ROADMAP.md) for what we expect to improve next and which ideas are still deliberately later.
 
 ---
 
@@ -49,7 +62,7 @@ Runeflow is a strong fit for repo-local developer workflows with light-to-modera
 - Agent pre-processing (assemble mode)
 - Scheduled repo automation
 
-It works well alongside existing agents (Claude Code, Codex, Cursor) rather than replacing them.
+It works well alongside existing agents such as Claude Code, Codex, and Cursor rather than trying to replace them.
 
 ## What it's not
 
@@ -62,6 +75,8 @@ It works well alongside existing agents (Claude Code, Codex, Cursor) rather than
 ---
 
 ## Benchmarks
+
+These numbers are directional, not a universal claim. They show where runtime-owned orchestration helps most: workflows that would otherwise burn tokens rediscovering tools and sequencing on every run.
 
 Evaluated across 4 task types, 2 providers (OpenAI, Cerebras):
 
@@ -96,6 +111,7 @@ g-stack's [`ship/SKILL.md`](https://github.com/garrytan/gstack/blob/main/ship/SK
 - [Quickstart](#quickstart)
 - [Core Loop](#core-loop)
 - [Debugging a broken skill](#debugging-a-broken-skill)
+- [Roadmap](./plans/ROADMAP.md)
 - [File shape](#file-shape)
 - [Step kinds](#step-kinds)
 - [Expressions](#expressions)
@@ -122,35 +138,45 @@ g-stack's [`ship/SKILL.md`](https://github.com/garrytan/gstack/blob/main/ship/SK
 npm install -g runeflow
 ```
 
-**Install a provider and add your key**
+**Pick a zero-install path**
 
-Runeflow uses the [Vercel AI SDK](https://sdk.vercel.ai) under the hood. Install the package for your provider:
+You don't need to declare a provider in the skill. Runeflow auto-selects the first path that works:
 
-```bash
-# pick one
-npm install @ai-sdk/cerebras    # CEREBRAS_API_KEY  — free tier at cloud.cerebras.ai
-npm install @ai-sdk/openai      # OPENAI_API_KEY
-npm install @ai-sdk/anthropic   # ANTHROPIC_API_KEY
-npm install @ai-sdk/groq        # GROQ_API_KEY      — free tier at console.groq.com
-npm install @ai-sdk/mistral     # MISTRAL_API_KEY
-npm install @ai-sdk/google      # GOOGLE_GENERATIVE_AI_API_KEY
-```
+1. `claude` CLI on PATH → Claude Code
+2. `AI_GATEWAY_API_KEY` → Vercel AI Gateway
+
+That means `npm install -g runeflow` is enough for anyone who already has Claude Code installed, and everyone else can use one gateway key:
 
 ```bash
-echo "CEREBRAS_API_KEY=your-key-here" > .env
+echo "AI_GATEWAY_API_KEY=your-key-here" > .env
 ```
+
+Want to pin the gateway explicitly for a run?
+
+```bash
+runeflow run ./skill.md --provider gateway --model anthropic/claude-sonnet-4.6
+```
+
+Want to silence the `runeflow: auto-selected provider=…` line? `export RUNEFLOW_QUIET=1`.
 
 **Generate a skill with `runeflow init`**
 
-Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.md` runeflow files — and generates a ready-to-run `.md` tailored to what it finds.
+Run inside any project directory. It inspects your repo — `package.json`, git log, CI config, installed SDKs, existing `.md` runeflow files — and generates a ready-to-run project skill in `.runeflow/skills/` tailored to what it finds.
 
 ```bash
 runeflow init
 ```
 
-If a cloud API key is present, the generated skill is polished by that provider. If not, a small local model (`Qwen2.5-0.5B`) is downloaded to `~/.runeflow/models/` and used instead — no sign-up required.
+If a cloud API key is present, Runeflow can lightly polish the generated docs and prompt. If not, it still scaffolds the minimal workflow directly so you can edit and run it right away:
+
+```bash
+runeflow skills list
+runeflow skills run open-pr --input '{"base_branch":"main"}'
+```
 
 **Or write one by hand:**
+
+The smallest runnable skill is frontmatter + one `cli` step + one `llm` step. No `llm:` block, no tool registry, no runtime file. Just shell commands and a prompt:
 
 ````md
 ---
@@ -162,9 +188,6 @@ inputs:
 outputs:
   title: string
   body: string
-llm:
-  provider: cerebras
-  model: qwen-3-235b-a22b-instruct-2507
 ---
 
 # Draft PR
@@ -172,23 +195,22 @@ llm:
 Write a concise PR title and a short body describing what changed and why.
 
 ```runeflow
-step branch type=tool {
-  tool: git.current_branch
-  out: { branch: string }
+step branch type=cli {
+  command: "git rev-parse --abbrev-ref HEAD"
 }
 
-step diff type=tool {
-  tool: git.diff_summary
-  with: { base: inputs.base_branch }
-  out: { base: string, summary: string, files: [string] }
+step diff type=cli {
+  command: "git diff --stat {{ inputs.base_branch }}...HEAD"
 }
 
 step draft type=llm {
   prompt: |
-    Draft a PR for {{ steps.branch.branch }} → {{ inputs.base_branch }}.
-    Changed files: {{ steps.diff.files }}
-    Diff: {{ steps.diff.summary }}
-  input: { diff_summary: steps.diff.summary }
+    Branch: {{ steps.branch.stdout }} → {{ inputs.base_branch }}
+    Diff summary:
+    {{ steps.diff.stdout }}
+
+    Draft a PR title (under 72 chars, starting with feat:/fix:/chore:) and a
+    plain-markdown body explaining what changed and why.
   schema: { title: string, body: string }
 }
 
@@ -199,13 +221,17 @@ output {
 ```
 ````
 
+That's the whole skill. No provider declared — runtime picks Claude Code if it's available, otherwise AI Gateway if `AI_GATEWAY_API_KEY` is set. `cli` steps are first-class: anything that runs in a shell goes here.
+
+> **Advanced:** pin a specific model with `--provider gateway --model anthropic/claude-sonnet-4.6` at the CLI, or commit an `llm:` block in frontmatter. Most authors don't need this — the default path just works.
+
 **Run it**
 
 ```bash
 runeflow run ./draft-pr.md --input '{"base_branch":"main"}'
 ```
 
-The default runtime handles all 6 providers automatically — no `--runtime` flag needed. Keys are resolved from `process.env` or a `.env` file in the current directory.
+The default runtime handles Claude Code, AI Gateway, and explicit direct providers — no `--runtime` flag needed. Keys are resolved from `process.env`, a `.env` file in the current directory, or `~/.runeflow/credentials.json`.
 
 Output:
 
@@ -323,6 +349,16 @@ A `.md` file is a standard Markdown document. YAML frontmatter declares inputs a
 
 Any `.md` file containing a `runeflow` block is valid. The `.runeflow.md` suffix is still accepted for backwards compatibility.
 
+Frontmatter fields:
+
+| Field | Required | What it does |
+|---|---|---|
+| `name`, `description`, `version` | yes | Identity. |
+| `inputs` | yes | Typed input schema; drives `--input` validation and interpolation. |
+| `outputs` | yes | Typed output schema; the final `output { ... }` block must satisfy it. |
+| `llm` | **no** | Most skills omit this. The runtime auto-selects Claude Code or AI Gateway. Declare an `llm:` block only to pin a specific model or use a direct provider. |
+| `mcp_servers`, `composio` | no | External tool wiring. See [Zero-config MCP & Composio wiring](#zero-config-mcp--composio-wiring). |
+
 ````md
 ---
 name: prepare-pr
@@ -333,10 +369,6 @@ inputs:
 outputs:
   title: string
   body: string
-llm:
-  provider: cerebras
-  router: false
-  model: qwen-3-235b-a22b-instruct-2507
 ---
 
 # Prepare PR
@@ -344,14 +376,12 @@ llm:
 Operator guidance lives here. The runtime projects this to `llm` steps as `docs`.
 
 ```runeflow
-step current_branch type=tool {
-  tool: git.current_branch
-  out: { branch: string }
+step current_branch type=cli {
+  command: "git rev-parse --abbrev-ref HEAD"
 }
 
 step draft_pr type=llm {
-  prompt: "Draft a PR for {{ steps.current_branch.branch }} targeting {{ inputs.base_branch }}."
-  input: { branch: steps.current_branch.branch }
+  prompt: "Draft a PR for {{ steps.current_branch.stdout }} targeting {{ inputs.base_branch }}."
   schema: { title: string, body: string }
 }
 
@@ -366,26 +396,44 @@ output {
 
 ## Step kinds
 
+The two you'll use almost everywhere are `cli` (shell out for anything the system knows how to do) and `llm` (call a model). Everything else is for specific situations.
+
 | Kind | What it does |
 |---|---|
-| `tool` | Calls a registered tool, validates output against `out` schema |
-| `parallel` | Runs a group of `tool`, `llm`, or `cli` steps concurrently, joins outputs |
-| `llm` | Calls an LLM handler, validates output against `schema` |
 | `cli` | Runs a shell command, captures `stdout`, `stderr`, `exit_code` |
-| `human_input` | Collects an answer from `--prompt`, a handler, or halts for resume |
-| `transform` | Runs a JS expression over resolved `input`, validates against `out` |
+| `llm` | Calls an LLM handler, validates output against `schema` |
+| `parallel` | Runs a group of `cli`, `llm`, or `tool` steps concurrently, joins outputs |
 | `branch` | Evaluates an expression, routes to `then` or `else` step |
+| `transform` | Runs a JS expression over resolved `input`, validates against `out` |
+| `tool` | Calls a registered tool (MCP, Composio, or built-in) with a typed schema |
+| `human_input` | Collects an answer from `--prompt`, a handler, or halts for resume |
 | `block` | Instantiates a named `block` template |
 
 Control flow: `retry=N`, `retry_delay`, `retry_backoff`, `fallback=<step>`, `next=<step>`, `skip_if: <expr>`, terminal `fail`.
 
-### tool
+### cli
+
+The default step for anything a shell can do — `git`, `gh`, `npm`, `docker`, `curl`, `jq`, whatever. Prefer `cli` whenever a command-line tool already exists for the job.
 
 ```runeflow
-step check type=tool {
-  tool: file.exists
-  with: { path: ".github/pull_request_template.md" }
-  out: { exists: boolean }
+step branch type=cli {
+  command: "git rev-parse --abbrev-ref HEAD"
+}
+
+step diff type=cli {
+  command: "git diff --stat {{ inputs.base_branch }}...HEAD"
+}
+```
+
+Each `cli` step outputs `{ stdout, stderr, exit_code }` — reference `steps.branch.stdout` downstream. Non-zero exit code halts the run by default; add `allow_failure: true` to capture it instead.
+
+### llm
+
+```runeflow
+step draft type=llm {
+  prompt: "Draft release notes since {{ inputs.base_ref }}."
+  input: { diff: steps.diff.stdout }
+  schema: { title: string, highlights: [string] }
 }
 ```
 
@@ -393,29 +441,27 @@ step check type=tool {
 
 ```runeflow
 parallel gather {
-  steps: [fetch_slack, fetch_drive]
+  steps: [fetch_tags, fetch_log]
 }
 
-step fetch_slack type=tool {
-  tool: slack.fetch
-  out: { items: [string] }
+step fetch_tags type=cli {
+  command: "git tag --sort=-v:refname | head -5"
 }
 
-step fetch_drive type=tool {
-  tool: drive.fetch
-  out: { items: [string] }
+step fetch_log type=cli {
+  command: "git log --oneline -20"
 }
 ```
 
-Fans out `tool`, `llm`, and `cli` steps concurrently. Child steps must be declared immediately after the `parallel` block in matching order and may not reference each other. `llm` children must declare a `schema`.
+Fans out `cli`, `llm`, and `tool` steps concurrently. Child steps must be declared immediately after the `parallel` block in matching order and may not reference each other. `llm` children must declare a `schema`.
 
-### llm
+### branch
 
 ```runeflow
-step draft type=llm {
-  prompt: "Draft release notes since {{ inputs.base_ref }}."
-  input: { diff: steps.diff.summary }
-  schema: { title: string, highlights: [string] }
+branch check {
+  if: steps.current_branch.stdout matches "^feat/"
+  then: feature_flow
+  else: other_flow
 }
 ```
 
@@ -429,25 +475,17 @@ step filter type=transform {
 }
 ```
 
-### branch
+### tool
+
+Use `tool:` when you need a typed, schema-validated call into an MCP server, Composio toolkit, or the [built-in registry](#built-in-tools). For plain shell commands, prefer `cli`.
 
 ```runeflow
-branch check {
-  if: steps.current_branch.branch matches "^feat/"
-  then: feature_flow
-  else: other_flow
+step fetch_issue type=tool {
+  tool: mcp.linear.get_issue
+  with: { id: inputs.issue_id }
+  out: { title: string, state: string }
 }
 ```
-
-### cli
-
-```runeflow
-step create_pr type=cli cache=false {
-  command: "gh pr create --title '{{ steps.draft.title }}' --base {{ inputs.base_branch }}"
-}
-```
-
-Non-zero exit code halts the run by default. Add `allow_failure: true` to capture it instead.
 
 ### human_input
 
@@ -537,18 +575,20 @@ String fields support `{{ expr }}` interpolation. Bare fields support expression
 
 ## Built-in tools
 
-| Tool | Description |
-|---|---|
-| `git.current_branch` | Current branch name |
-| `git.diff_summary` | Diff stat between base ref and HEAD |
-| `git.push_current_branch` | Push current branch to upstream |
-| `git.log` | Commit log between a base ref and HEAD |
-| `git.tag_list` | List tags sorted by version, newest first |
-| `file.exists` | Check if a path exists |
-| `file.read` | Read a file's contents |
-| `file.write` | Write content to a file |
-| `util.complete` | Pass-through — returns its input as output |
-| `util.fail` | Return a structured failure message |
+> **First check if `cli` works.** For anything a shell can run — `git`, `gh`, `npm`, `curl` — use a `cli` step. Built-in tools exist for the narrow cases where you need typed outputs or a structured return shape that's awkward to parse from stdout.
+
+| Tool | Description | Usually simpler as |
+|---|---|---|
+| `git.current_branch` | Current branch name | `cli: git rev-parse --abbrev-ref HEAD` |
+| `git.diff_summary` | Diff stat between base ref and HEAD | `cli: git diff --stat {{ inputs.base }}...HEAD` |
+| `git.push_current_branch` | Push current branch to upstream | `cli: git push -u origin HEAD` |
+| `git.log` | Commit log between a base ref and HEAD | `cli: git log --oneline {{ inputs.base }}..HEAD` |
+| `git.tag_list` | List tags sorted by version, newest first | `cli: git tag --sort=-v:refname` |
+| `file.exists` | Check if a path exists | `cli: test -e <path> && echo yes` |
+| `file.read` | Read a file's contents | `cli: cat <path>` |
+| `file.write` | Write content to a file | `cli: echo ... > <path>` |
+| `util.complete` | Pass-through — returns its input as output | — |
+| `util.fail` | Return a structured failure message | — |
 
 ```bash
 runeflow tools list
@@ -564,8 +604,8 @@ runeflow init [--name <name>] [--context <hint>] [--template <id>]
               [--provider <provider>] [--model <model>]
               [--no-local-llm] [--no-polish] [--force]
 runeflow validate <file> [--runtime ./runtime.js] [--format json]
-runeflow run <file> --input '{"key":"value"}' [--runtime ./runtime.js]
-            [--runs-dir ./.runeflow-runs] [--force]
+runeflow run <file> --input '{"key":"value"}' [--provider <name>] [--model <name>]
+            [--runtime ./runtime.js] [--runs-dir ./.runeflow-runs] [--force]
             [--record-fixture <path>]
             [--telemetry] [--telemetry-output <path>]
 runeflow dryrun <file> --input '{"key":"value"}' [--runtime ./runtime.js]
@@ -588,7 +628,7 @@ runeflow skills list
 runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 ```
 
-`init` — inspects the current directory and generates a ready-to-run `.md` skill file. Detects installed SDKs, git history, CI config, and existing runeflow files to pick the best template. Pass `--context` for a hint, `--template` to force one, or `--no-local-llm` to skip the local model download.
+`init` — inspects the current directory and generates a ready-to-run `.md` skill in `.runeflow/skills/`. Detects installed SDKs, git history, CI config, and existing runeflow files to pick the best template. Generated workflows bias toward the minimum-surface path: `cli` first when possible, no `llm:` frontmatter unless you explicitly pin it, and follow-up commands that use `runeflow skills run`.
 
 `dryrun` — validates the file, then walks every step resolving all bindings with the provided inputs — but executes nothing. Shows exactly what each step would do: resolved arguments, prompts, commands, and branch conditions. Steps that depend on prior outputs use typed placeholders derived from the output schema.
 
@@ -614,11 +654,12 @@ runeflow skills run <name> [--input '{"key":"value"}'] [--runtime ./runtime.js]
 
 ## Writing a runtime
 
-The default runtime activates automatically when no `--runtime` flag is passed. It supports 6 providers via the [Vercel AI SDK](https://sdk.vercel.ai). Install the packages for the providers you need:
+The default runtime activates automatically when no `--runtime` flag is passed. It has two zero-install paths built in:
 
-```bash
-npm install @ai-sdk/cerebras   # or openai, anthropic, groq, mistral, google
-```
+| Auto priority | Path | Requirement |
+|---|---|---|
+| 1 | `claude-cli` | `claude` CLI on PATH |
+| 2 | `gateway` | `AI_GATEWAY_API_KEY` |
 
 To use it explicitly in code:
 
@@ -628,16 +669,22 @@ import { createDefaultRuntime } from "runeflow";
 export default createDefaultRuntime();
 ```
 
-| Provider | Package | Key |
+| Explicit provider | Package | Key / Requirement |
 |---|---|---|
-| `cerebras` | `@ai-sdk/cerebras` | `CEREBRAS_API_KEY` |
-| `openai` | `@ai-sdk/openai` | `OPENAI_API_KEY` |
+| `gateway` | none | `AI_GATEWAY_API_KEY` |
 | `anthropic` | `@ai-sdk/anthropic` | `ANTHROPIC_API_KEY` |
+| `openai` | `@ai-sdk/openai` | `OPENAI_API_KEY` |
+| `cerebras` | `@ai-sdk/cerebras` | `CEREBRAS_API_KEY` |
+| `google` | `@ai-sdk/google` | `GOOGLE_GENERATIVE_AI_API_KEY` |
 | `groq` | `@ai-sdk/groq` | `GROQ_API_KEY` |
 | `mistral` | `@ai-sdk/mistral` | `MISTRAL_API_KEY` |
-| `google` | `@ai-sdk/google` | `GOOGLE_GENERATIVE_AI_API_KEY` |
+| `claude-cli` | none | `claude` CLI on PATH |
 
 Keys are resolved via the auth waterfall: `process.env` → `.env` file → `~/.runeflow/credentials.json`.
+
+**Auto-selection.** When a skill omits `llm.provider`, the runtime prefers Claude Code and otherwise falls back to AI Gateway. A model-only config such as `model: anthropic/claude-sonnet-4.6` also selects Gateway automatically. You'll see a one-line `runeflow: auto-selected provider=…` note on stderr; silence it with `RUNEFLOW_QUIET=1`.
+
+**Advanced direct providers.** If you want to skip Gateway, use an explicit provider such as `openai` or `anthropic` and install the matching `@ai-sdk/*` package. That path is opt-in and keeps the default UX simple.
 
 To add a custom provider or override behavior:
 
@@ -940,7 +987,7 @@ await runRuneflow(definition, inputs, runtime, {
 
 ## Skill discovery
 
-Project-level skills live in `.runeflow/skills/`. Any `.md` file there containing a `runeflow` block is discoverable:
+Project-level skills live in `.runeflow/skills/`. `runeflow init` writes there by default, and any `.md` file in that directory containing a `runeflow` block is discoverable:
 
 ```bash
 runeflow skills list

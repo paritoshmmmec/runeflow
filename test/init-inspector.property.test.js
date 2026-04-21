@@ -65,7 +65,7 @@ test("Property 1: Signal set always contains required fields for any combination
           if (hasRuneflowMd) {
             await fs.writeFile(
               path.join(tempDir, "test.md"),
-              "---\nname: test-skill\ndescription: A test skill\nversion: 0.1\ninputs: {}\noutputs:\n  result: string\n---\n\n# Test Skill\n",
+              "---\nname: test-skill\ndescription: A test skill\nversion: 0.1\ninputs: {}\noutputs:\n  result: string\n---\n\n```runeflow\nstep run type=llm {\n  prompt: |\n    Say hi.\n  schema: { result: string }\n}\n\noutput {\n  result: steps.run.result\n}\n```\n",
               "utf8",
             );
           }

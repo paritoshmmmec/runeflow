@@ -197,21 +197,62 @@ function extractToolNames(content) {
 }
 
 async function readExistingSkills(cwd) {
-  const entries = await tryReaddir(cwd);
   const skillNames = [];
   const skillTools = [];
+  const seenNames = new Set();
 
-  for (const entry of entries) {
-    if (!entry.endsWith(".md")) continue;
-    const content = await tryRead(path.join(cwd, entry));
-    if (content === null) continue;
+  async function walk(dir, depth, maxDepth) {
+    if (depth > maxDepth) return;
 
-    const name = extractFrontmatterName(content);
-    if (name) skillNames.push(name);
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
 
-    const tools = extractToolNames(content);
-    skillTools.push(...tools);
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") {
+        continue;
+      }
+
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        if (entry.name === ".runeflow") {
+          await walk(path.join(fullPath, "skills"), depth + 1, maxDepth);
+          continue;
+        }
+        await walk(fullPath, depth + 1, maxDepth);
+        continue;
+      }
+
+      if (!entry.isFile() || !entry.name.endsWith(".md")) {
+        continue;
+      }
+
+      const content = await tryRead(fullPath);
+      if (content === null) {
+        continue;
+      }
+
+      const hasRuneflowBlock = /```(?:runeflow|skill)\n/.test(content);
+      if (!hasRuneflowBlock) {
+        continue;
+      }
+
+      const name = extractFrontmatterName(content) ?? path.basename(entry.name, ".md");
+      if (!seenNames.has(name)) {
+        seenNames.add(name);
+        skillNames.push(name);
+      }
+
+      const tools = extractToolNames(content);
+      skillTools.push(...tools);
+    }
   }
+
+  await walk(cwd, 0, 4);
 
   return { skillNames, skillTools: [...new Set(skillTools)] };
 }

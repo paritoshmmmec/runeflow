@@ -1,8 +1,11 @@
 /**
  * Default Runeflow runtime — powered by Vercel AI SDK.
  *
- * Supports: openai, anthropic, cerebras, groq, mistral, google
- * Each provider package is an optional peer dependency — only install what you use:
+ * Zero-install auto path:
+ *   1. Claude Code CLI (`claude`) if available
+ *   2. Vercel AI Gateway (`AI_GATEWAY_API_KEY`)
+ *
+ * Explicit direct providers remain available for advanced users:
  *
  *   npm install @ai-sdk/openai      → provider: openai
  *   npm install @ai-sdk/anthropic   → provider: anthropic
@@ -10,6 +13,11 @@
  *   npm install @ai-sdk/groq        → provider: groq
  *   npm install @ai-sdk/mistral     → provider: mistral
  *   npm install @ai-sdk/google      → provider: google
+ *
+ * Auto-selection: when a skill omits `llm.provider`, the runtime prefers
+ * Claude Code on local machines and otherwise falls back to AI Gateway.
+ * A model-only config like `model: anthropic/claude-sonnet-4.6` is treated
+ * as an explicit Gateway request.
  *
  * API keys are resolved via the auth waterfall:
  *   1. process.env
@@ -22,10 +30,14 @@
  *   await runRuneflow(definition, inputs, runtime, options);
  */
 
-import { generateObject, streamObject } from "ai";
+import { createGateway, generateObject, streamObject } from "ai";
 import { z } from "zod";
+import { execFileSync } from "node:child_process";
 import { resolveApiKey } from "./auth.js";
+import { callClaudeCli } from "./claude-cli-provider.js";
 import { isPlainObject } from "./utils.js";
+
+const DEFAULT_GATEWAY_MODEL = "anthropic/claude-sonnet-4.6";
 
 // ─── Schema conversion: Runeflow schema → Zod ────────────────────────────────
 
@@ -111,6 +123,13 @@ function buildZodObject(schema) {
 // ─── Provider loader (lazy, graceful error if package not installed) ──────────
 
 const PROVIDER_FACTORIES = {
+  gateway: {
+    envKey: "AI_GATEWAY_API_KEY",
+    load: async (apiKey, llm) => {
+      const gateway = createGateway({ apiKey });
+      return gateway(llm.model ?? DEFAULT_GATEWAY_MODEL);
+    },
+  },
   openai: {
     envKey: "OPENAI_API_KEY",
     load: async (apiKey, llm) => {
@@ -154,6 +173,82 @@ const PROVIDER_FACTORIES = {
     },
   },
 };
+
+// ─── Auto-selection ───────────────────────────────────────────────────────────
+
+function isGatewayModelId(model) {
+  return typeof model === "string" && /^[a-z0-9][a-z0-9-]*\/[A-Za-z0-9._-]+$/i.test(model.trim());
+}
+
+function envHasKey(provider) {
+  const factory = PROVIDER_FACTORIES[provider];
+  if (!factory) return false;
+  try {
+    // Use resolveApiKey to honor process.env + .env + credentials.json.
+    return Boolean(resolveApiKey(provider, "_auto-select"));
+  } catch {
+    return false;
+  }
+}
+
+// Auto-select state is cached across calls in one process for two reasons:
+//   - `which claude` is a syscall we don't want to repeat per step
+//   - the "auto-selected provider=…" stderr line should only print once
+// Tests can force a fresh check via `_resetAutoSelectCache` (same pattern
+// as _resetEnvAllowlistCache in src/utils.js).
+let claudeCliChecked = false;
+let claudeCliAvailable = false;
+let autoSelectAnnounced = false;
+
+export function _resetAutoSelectCache() {
+  claudeCliChecked = false;
+  claudeCliAvailable = false;
+  autoSelectAnnounced = false;
+}
+
+function hasClaudeCli() {
+  if (claudeCliChecked) return claudeCliAvailable;
+  claudeCliChecked = true;
+  try {
+    execFileSync("which", ["claude"], { stdio: "pipe" });
+    claudeCliAvailable = true;
+  } catch {
+    claudeCliAvailable = false;
+  }
+  return claudeCliAvailable;
+}
+
+function announceAutoSelect(provider, source) {
+  if (autoSelectAnnounced) return;
+  if (process.env.RUNEFLOW_QUIET === "1") return;
+  autoSelectAnnounced = true;
+  process.stderr.write(
+    `runeflow: auto-selected provider=${provider} (${source})\n`,
+  );
+}
+
+/**
+ * Pick a provider based on available credentials. Returns a partial
+ * llm config ({ provider, model? }) or throws with a clear message
+ * listing every env var that would have been accepted.
+ */
+export function autoSelectProvider() {
+  if (hasClaudeCli()) {
+    announceAutoSelect("claude-cli", "found claude on PATH");
+    return { provider: "claude-cli" };
+  }
+
+  if (envHasKey("gateway")) {
+    announceAutoSelect("gateway", `found ${PROVIDER_FACTORIES.gateway.envKey}`);
+    return { provider: "gateway" };
+  }
+
+  throw new Error(
+    `No zero-install LLM path is available.\n` +
+    `Install the Claude CLI (https://docs.anthropic.com/claude-code) or set AI_GATEWAY_API_KEY.\n` +
+    `Runeflow checks process.env, .env, and ~/.runeflow/credentials.json for AI_GATEWAY_API_KEY.`,
+  );
+}
 
 async function loadModel(provider, llm, stepId) {
   const factory = PROVIDER_FACTORIES[provider];
@@ -204,14 +299,33 @@ function buildPrompt({ prompt, input, docs }) {
 // ─── Core handler ─────────────────────────────────────────────────────────────
 
 async function handleLlmStep({ llm, prompt, input, docs, schema, step, onPartialObject }) {
-  const provider = llm?.provider;
-  if (!provider) {
-    throw new Error(`Step '${step.id}' has no llm.provider configured.`);
+  let effectiveLlm = llm;
+
+  if (!effectiveLlm?.provider) {
+    if (isGatewayModelId(effectiveLlm?.model)) {
+      announceAutoSelect("gateway", `using model=${effectiveLlm.model}`);
+      effectiveLlm = { ...(llm ?? {}), provider: "gateway" };
+    } else {
+      // Merge any model override from the original config onto the auto-pick.
+      effectiveLlm = { ...(llm ?? {}), ...autoSelectProvider() };
+    }
   }
 
-  const model = await loadModel(provider, llm, step.id);
+  const provider = effectiveLlm.provider;
   const zodSchema = runeflowSchemaToZod(schema ?? {});
   const fullPrompt = buildPrompt({ prompt, input, docs });
+
+  // Claude CLI path — shell out to `claude -p` and parse the JSON response.
+  if (provider === "claude-cli") {
+    return callClaudeCli({
+      prompt: fullPrompt,
+      schema: zodSchema,
+      model: effectiveLlm.model,
+      stepId: step.id,
+    });
+  }
+
+  const model = await loadModel(provider, effectiveLlm, step.id);
 
   if (typeof onPartialObject === "function") {
     const result = streamObject({
@@ -240,21 +354,25 @@ async function handleLlmStep({ llm, prompt, input, docs, schema, step, onPartial
 
 /**
  * Create a default runtime backed by the Vercel AI SDK.
- * Supports openai, anthropic, cerebras, groq, mistral, google.
- *
- * Install only the providers you need:
- *   npm install @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/cerebras
+ * Zero-install defaults: Claude Code CLI and AI Gateway.
+ * Advanced direct providers: gateway, openai, anthropic, cerebras, groq,
+ * mistral, google.
  *
  * @returns {{ llms: Record<string, Function> }}
  */
 export function createDefaultRuntime() {
   const handler = (payload) => handleLlmStep(payload);
 
-  return {
-    llms: Object.fromEntries(
-      Object.keys(PROVIDER_FACTORIES).map((provider) => [provider, handler]),
-    ),
-  };
+  const llms = Object.fromEntries(
+    Object.keys(PROVIDER_FACTORIES).map((provider) => [provider, handler]),
+  );
+  // Route for Claude CLI fallback.
+  llms["claude-cli"] = handler;
+  // Sentinel: the runtime calls handler with this key when no provider is
+  // declared anywhere. handleLlmStep() will auto-select inside.
+  llms["_auto"] = handler;
+
+  return { llms };
 }
 
 // Default export for --runtime flag usage

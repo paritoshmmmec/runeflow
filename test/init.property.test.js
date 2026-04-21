@@ -23,6 +23,12 @@ async function makeTmpDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), "rf-init-prop-"));
 }
 
+async function listGeneratedFiles(dir) {
+  const skillsDir = path.join(dir, ".runeflow", "skills");
+  const entries = await fs.readdir(skillsDir).catch(() => []);
+  return entries.filter((entry) => entry.endsWith(".md")).map((entry) => path.join(skillsDir, entry));
+}
+
 // ---------------------------------------------------------------------------
 // Property 11: All written file paths appear in stdout
 // Validates: Requirements 9.1
@@ -58,16 +64,15 @@ test("Property 11: All written file paths appear in stdout for any flag combinat
             template,
           });
 
-          // Find all files written to the temp dir
-          const entries = await fs.readdir(dir);
-          const writtenFiles = entries.filter((f) => f.endsWith(".md") || f === "runtime.js");
+          const writtenFiles = await listGeneratedFiles(dir);
 
           const stdout = capturedLines.join("\n");
 
           for (const file of writtenFiles) {
+            const relativeFile = path.relative(dir, file);
             assert.ok(
-              stdout.includes(file),
-              `stdout should contain "${file}" but got:\n${stdout}`,
+              stdout.includes(relativeFile) || stdout.includes(path.basename(file)),
+              `stdout should contain "${relativeFile}" but got:\n${stdout}`,
             );
           }
         } finally {
@@ -174,11 +179,10 @@ test("Property 9: Polish path produces a skill with the same step IDs and types 
             silent: true,
           });
 
-          const entries = await fs.readdir(dir);
-          const skillFiles = entries.filter((f) => f.endsWith(".md"));
+          const skillFiles = await listGeneratedFiles(dir);
           assert.ok(skillFiles.length >= 1, "Should write at least one skill file");
 
-          const content = await fs.readFile(path.join(dir, skillFiles[0]), "utf8");
+          const content = await fs.readFile(skillFiles[0], "utf8");
           const parsed = parseRuneflow(content);
           const result = validateRuneflow(parsed);
 

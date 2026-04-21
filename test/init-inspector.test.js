@@ -104,13 +104,15 @@ test("ignores runeflow workflow files when scanning for claude skill files", asy
   }
 });
 
-// 7. Existing .md skill names are extracted
-test("extracts skill names from .md frontmatter", async () => {
+// 7. Existing runeflow skill names are extracted
+test("extracts skill names from runeflow files, including .runeflow/skills", async () => {
   const dir = await makeTmpDir();
   try {
+    const skillsDir = path.join(dir, ".runeflow", "skills");
+    await fs.mkdir(skillsDir, { recursive: true });
     await fs.writeFile(
-      path.join(dir, "my-skill.md"),
-      "---\nname: my-skill\ndescription: A test skill\n---\n\n# My Skill\n",
+      path.join(skillsDir, "my-skill.md"),
+      "---\nname: my-skill\ndescription: A test skill\nversion: 0.1\ninputs: {}\noutputs:\n  result: string\n---\n\n```runeflow\nstep run type=llm {\n  prompt: |\n    Say hi.\n  schema: { result: string }\n}\n\noutput {\n  result: steps.run.result\n}\n```\n",
     );
     const result = await inspectRepo({ cwd: dir });
     assert.ok(result.existingSkillNames.includes("my-skill"));

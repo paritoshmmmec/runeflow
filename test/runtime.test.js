@@ -165,6 +165,48 @@ output {
   });
 });
 
+test("runRuneflow routes model-only llm config through the _auto handler", async () => {
+  const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
+  const parsed = parseRuneflow(`---
+name: auto-llm
+description: Auto-selected llm runtime path
+version: 0.1
+inputs: {}
+outputs:
+  result: string
+llm:
+  model: anthropic/claude-sonnet-4.6
+---
+
+\`\`\`runeflow
+step draft type=llm {
+  prompt: "write"
+  schema: { result: string }
+}
+
+output {
+  result: steps.draft.result
+}
+\`\`\`
+`);
+
+  const runtime = {
+    llms: {
+      _auto: async ({ llm, prompt }) => {
+        assert.equal(llm.provider, undefined);
+        assert.equal(llm.model, "anthropic/claude-sonnet-4.6");
+        assert.equal(prompt, "write");
+        return { result: "ok" };
+      },
+    },
+  };
+
+  const run = await runRuneflow(parsed, {}, runtime, { runsDir });
+
+  assert.equal(run.status, "success");
+  assert.equal(run.outputs.result, "ok");
+});
+
 test("runRuneflow preserves native types for exact templates and strings for mixed templates", async () => {
   const runsDir = await fs.mkdtemp(path.join(os.tmpdir(), "runeflow-runs-"));
   const parsed = parseRuneflow(`---

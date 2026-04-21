@@ -1,4 +1,4 @@
-import { slugify } from "../init-utils.js";
+import { buildFrontmatter, defaultSkillName } from "./helpers.js";
 
 export const template = {
   id: "linear-issue",
@@ -12,29 +12,23 @@ export const template = {
     ],
   },
   generate(signals, options = {}) {
-    const provider = options.provider ?? "cerebras";
-    const model = options.model ?? "qwen-3-235b-a22b-instruct-2507";
-    const repoSlug = signals.repoName ? slugify(signals.repoName) + "-" : "";
-    const skillName = options.name ?? `${repoSlug}linear-issue`;
+    const skillName = defaultSkillName("linear-issue", options);
 
-    return `---
-name: ${skillName}
-description: Draft and create a Linear issue.
-version: 0.1
-inputs:
-  title: string
-  context: string
-outputs:
-  result: string
-llm:
-  provider: ${provider}
-  router: false
-  model: ${model}
----
+    const frontmatter = buildFrontmatter({
+      name: skillName,
+      description: "Draft a Linear issue title and description from local context.",
+      inputs: { title: "string", context: "string" },
+      outputs: { title: "string", description: "string" },
+      llmConfig: options.llmConfig,
+    });
+
+    return `${frontmatter}
 
 # Linear Issue
 
-Draft and create a Linear issue from the provided context.
+Draft a clean engineering issue from the supplied title and context. Keep the
+result ready to paste into Linear, but avoid inventing implementation details
+that are not present in the input.
 
 \`\`\`runeflow
 step draft type=llm {
@@ -44,18 +38,13 @@ step draft type=llm {
     Context:
     {{ inputs.context }}
 
-    Write a clear title and description suitable for an engineering team.
+    Write a concise title and a clear description suitable for an engineering team.
   schema: { title: string, description: string }
 }
 
-step done type=tool {
-  tool: util.complete
-  with: { result: steps.draft.description }
-  out: { result: string }
-}
-
 output {
-  result: steps.done.result
+  title: steps.draft.title
+  description: steps.draft.description
 }
 \`\`\`
 `;

@@ -14,6 +14,7 @@ import path from "node:path";
 import os from "node:os";
 
 const PROVIDER_KEY_MAP = {
+  gateway: "AI_GATEWAY_API_KEY",
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   cerebras: "CEREBRAS_API_KEY",
