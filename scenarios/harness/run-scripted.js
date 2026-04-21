@@ -12,6 +12,7 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -97,9 +98,12 @@ function evaluateSkillAgainstScenario(scenarioName, skillPath) {
 
   const budget = JSON.parse(fs.readFileSync(budgetFile, "utf8"));
   const effectiveFixture = buildScenarioFixture(scenarioDir, skillPath);
+  // Write the remapped fixture to the OS temp dir so we never dirty the repo
+  // working tree (Loop B runs against scenarios/ in CI and the previous
+  // "adjacent to the skill" path leaked a generated file into every run).
   const tempFixturePath = path.join(
-    path.dirname(skillPath),
-    `.scenario-fixture-${path.basename(skillPath, ".md")}.json`,
+    fs.mkdtempSync(path.join(os.tmpdir(), "runeflow-scenario-")),
+    `${path.basename(skillPath, ".md")}.fixture.json`,
   );
   fs.writeFileSync(tempFixturePath, JSON.stringify(effectiveFixture, null, 2));
   const result = {
@@ -110,64 +114,70 @@ function evaluateSkillAgainstScenario(scenarioName, skillPath) {
     concepts: { used: [], allowed: budget.concepts, over_budget: [] },
   };
 
-  // ─── 1. validate ──────────────────────────────────────────────────────────
-  const validate = spawnSync("node", [BIN, "validate", skillPath, "--format", "json"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-  if (validate.status !== 0) {
-    result.ok = false;
-    fail(result, "validate", {
-      exit_code: validate.status,
-      stdout: validate.stdout,
-      stderr: validate.stderr,
+  try {
+    // ─── 1. validate ────────────────────────────────────────────────────────
+    const validate = spawnSync("node", [BIN, "validate", skillPath, "--format", "json"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
     });
-  } else {
-    let parsed = null;
-    try { parsed = JSON.parse(validate.stdout); } catch { /* no json */ }
-    if (parsed && parsed.valid === false) {
+    if (validate.status !== 0) {
       result.ok = false;
-      fail(result, "validate", { issues: parsed.issues });
+      fail(result, "validate", {
+        exit_code: validate.status,
+        stdout: validate.stdout,
+        stderr: validate.stderr,
+      });
     } else {
-      pass(result, "validate");
+      let parsed = null;
+      try { parsed = JSON.parse(validate.stdout); } catch { /* no json */ }
+      if (parsed && parsed.valid === false) {
+        result.ok = false;
+        fail(result, "validate", { issues: parsed.issues });
+      } else {
+        pass(result, "validate");
+      }
     }
-  }
 
-  // ─── 2. runeflow test --fixture ───────────────────────────────────────────
-  const test = spawnSync(
-    "node",
-    [BIN, "test", skillPath, "--fixture", tempFixturePath],
-    { cwd: REPO_ROOT, encoding: "utf8" },
-  );
-  let testJson = null;
-  try { testJson = JSON.parse(test.stdout); } catch { /* no json */ }
-  if (test.status !== 0 || !testJson || testJson.pass !== true) {
-    result.ok = false;
-    fail(result, "test", {
-      exit_code: test.status,
-      pass: testJson?.pass,
-      failures: testJson?.failures,
-      stderr_tail: (test.stderr ?? "").split("\n").slice(-10).join("\n"),
-    });
-  } else {
-    pass(result, "test");
-  }
+    // ─── 2. runeflow test --fixture ─────────────────────────────────────────
+    const test = spawnSync(
+      "node",
+      [BIN, "test", skillPath, "--fixture", tempFixturePath],
+      { cwd: REPO_ROOT, encoding: "utf8" },
+    );
+    let testJson = null;
+    try { testJson = JSON.parse(test.stdout); } catch { /* no json */ }
+    if (test.status !== 0 || !testJson || testJson.pass !== true) {
+      result.ok = false;
+      fail(result, "test", {
+        exit_code: test.status,
+        pass: testJson?.pass,
+        failures: testJson?.failures,
+        stderr_tail: (test.stderr ?? "").split("\n").slice(-10).join("\n"),
+      });
+    } else {
+      pass(result, "test");
+    }
 
-  // ─── 3. concept count ─────────────────────────────────────────────────────
-  const source = fs.readFileSync(skillPath, "utf8");
-  const used = [...countConcepts(source)].sort();
-  const allowed = new Set(budget.concepts ?? []);
-  const overBudget = used.filter((c) => !allowed.has(c));
-  result.concepts.used = used;
-  result.concepts.over_budget = overBudget;
-  if (overBudget.length > 0) {
-    result.ok = false;
-    fail(result, "concept_budget", { used, allowed: [...allowed], over_budget: overBudget });
-  } else {
-    pass(result, "concept_budget");
-  }
+    // ─── 3. concept count ───────────────────────────────────────────────────
+    const source = fs.readFileSync(skillPath, "utf8");
+    const used = [...countConcepts(source)].sort();
+    const allowed = new Set(budget.concepts ?? []);
+    const overBudget = used.filter((c) => !allowed.has(c));
+    result.concepts.used = used;
+    result.concepts.over_budget = overBudget;
+    if (overBudget.length > 0) {
+      result.ok = false;
+      fail(result, "concept_budget", { used, allowed: [...allowed], over_budget: overBudget });
+    } else {
+      pass(result, "concept_budget");
+    }
 
-  return result;
+    return result;
+  } finally {
+    // Clean up the temp fixture dir regardless of pass/fail. rmSync with
+    // force avoids throwing if anything else already removed it.
+    fs.rmSync(path.dirname(tempFixturePath), { recursive: true, force: true });
+  }
 }
 
 function runScenario(scenarioName) {

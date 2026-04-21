@@ -102,24 +102,23 @@ async function spawnClaude({ args, promptInput }) {
  */
 export async function callClaudeCli({ prompt, schema, model, stepId }) {
   const wrapped = wrapPrompt(prompt, schema);
-  const args = ["-p", "--output-format", "json"];
+
+  // The `claude` CLI accepts the prompt either as a positional arg after `-p`
+  // or, if the positional is omitted, via stdin. For large prompts we use
+  // stdin to avoid OS-level argv length limits (ARG_MAX on some platforms is
+  // ~128KB, and we also don't want the prompt showing up in `ps` output).
+  const LONG_PROMPT_THRESHOLD = 4000;
+  const useStdin = wrapped.length > LONG_PROMPT_THRESHOLD;
+
+  const args = useStdin
+    ? ["-p", "--output-format", "json"]
+    : ["-p", wrapped, "--output-format", "json"];
   if (model) args.push("--model", model);
 
-  // Pipe the prompt via stdin to avoid argv length limits on large prompts.
-  args[1] = "--"; // `claude -p --` reads prompt from stdin
-  // But `-p` with no arg is also supported; use argv when the prompt is small.
-  // Keeping it simple: always pass via argv.
-  let result;
-  if (wrapped.length > 4000) {
-    // Long prompt: use stdin path (`claude -p -` with stdin, per CLI docs).
-    const stdinArgs = ["-p", "--output-format", "json"];
-    if (model) stdinArgs.push("--model", model);
-    result = await spawnClaude({ args: stdinArgs, promptInput: wrapped });
-  } else {
-    const argvArgs = ["-p", wrapped, "--output-format", "json"];
-    if (model) argvArgs.push("--model", model);
-    result = await spawnClaude({ args: argvArgs });
-  }
+  const result = await spawnClaude({
+    args,
+    promptInput: useStdin ? wrapped : undefined,
+  });
 
   if (result.code !== 0) {
     const snippet = (result.stderr || "").slice(-500).trim();

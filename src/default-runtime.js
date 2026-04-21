@@ -191,8 +191,21 @@ function envHasKey(provider) {
   }
 }
 
+// Auto-select state is cached across calls in one process for two reasons:
+//   - `which claude` is a syscall we don't want to repeat per step
+//   - the "auto-selected provider=…" stderr line should only print once
+// Tests can force a fresh check via `_resetAutoSelectCache` (same pattern
+// as _resetEnvAllowlistCache in src/utils.js).
 let claudeCliChecked = false;
 let claudeCliAvailable = false;
+let autoSelectAnnounced = false;
+
+export function _resetAutoSelectCache() {
+  claudeCliChecked = false;
+  claudeCliAvailable = false;
+  autoSelectAnnounced = false;
+}
+
 function hasClaudeCli() {
   if (claudeCliChecked) return claudeCliAvailable;
   claudeCliChecked = true;
@@ -205,7 +218,6 @@ function hasClaudeCli() {
   return claudeCliAvailable;
 }
 
-let autoSelectAnnounced = false;
 function announceAutoSelect(provider, source) {
   if (autoSelectAnnounced) return;
   if (process.env.RUNEFLOW_QUIET === "1") return;
